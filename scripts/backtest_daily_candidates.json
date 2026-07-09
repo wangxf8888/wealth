@@ -1,0 +1,4630 @@
+[
+  {
+    "date": "2025-01-08",
+    "available_slots": 5,
+    "candidates": [
+      {
+        "code": "sz.002575",
+        "star_count": 4,
+        "score": 4.0,
+        "strategy": "score_buy",
+        "buy_price": 7.37
+      },
+      {
+        "code": "sz.300493",
+        "star_count": 4,
+        "score": 4.0,
+        "strategy": "score_buy",
+        "buy_price": 25.14
+      },
+      {
+        "code": "sh.600333",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 4.74
+      },
+      {
+        "code": "sh.600793",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 20.6
+      },
+      {
+        "code": "sz.002576",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 13.93
+      },
+      {
+        "code": "sz.002878",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 15.32
+      },
+      {
+        "code": "sz.300042",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 21.0
+      },
+      {
+        "code": "sz.300220",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 12.63
+      },
+      {
+        "code": "sz.300333",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 15.22
+      },
+      {
+        "code": "sz.300417",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 11.25
+      },
+      {
+        "code": "sz.300941",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 25.3
+      }
+    ],
+    "selected": [
+      "sz.002575",
+      "sz.300493",
+      "sh.600333",
+      "sh.600793",
+      "sz.002576"
+    ],
+    "skipped_full": []
+  },
+  {
+    "date": "2025-01-10",
+    "available_slots": 5,
+    "candidates": [
+      {
+        "code": "sh.603070",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 15.03
+      },
+      {
+        "code": "sh.603339",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 12.88
+      },
+      {
+        "code": "sh.603809",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 14.15
+      },
+      {
+        "code": "sz.002031",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 5.51
+      },
+      {
+        "code": "sz.002162",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 3.66
+      },
+      {
+        "code": "sz.002313",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 9.47
+      },
+      {
+        "code": "sz.002692",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 4.74
+      },
+      {
+        "code": "sz.003021",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 87.5
+      },
+      {
+        "code": "sz.300715",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 10.55
+      }
+    ],
+    "selected": [
+      "sh.603070",
+      "sh.603339",
+      "sh.603809",
+      "sz.002031",
+      "sz.002162"
+    ],
+    "skipped_full": []
+  },
+  {
+    "date": "2025-01-13",
+    "available_slots": 4,
+    "candidates": [
+      {
+        "code": "sh.600316",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 30.4
+      },
+      {
+        "code": "sh.603015",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 12.75
+      },
+      {
+        "code": "sh.603029",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 17.53
+      },
+      {
+        "code": "sh.603063",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 29.51
+      },
+      {
+        "code": "sh.603305",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 14.06
+      },
+      {
+        "code": "sh.603683",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 9.48
+      },
+      {
+        "code": "sz.000573",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 5.2
+      },
+      {
+        "code": "sz.002050",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 27.2
+      },
+      {
+        "code": "sz.002170",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 8.62
+      },
+      {
+        "code": "sz.002536",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 14.33
+      },
+      {
+        "code": "sz.002571",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 5.57
+      },
+      {
+        "code": "sz.300822",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 23.4
+      },
+      {
+        "code": "sz.301000",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 30.05
+      },
+      {
+        "code": "sz.301628",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 83.03
+      }
+    ],
+    "selected": [
+      "sh.600316",
+      "sh.603015",
+      "sh.603029"
+    ],
+    "skipped_full": []
+  },
+  {
+    "date": "2025-01-14",
+    "available_slots": 2,
+    "candidates": [
+      {
+        "code": "sh.600650",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 14.28
+      },
+      {
+        "code": "sh.600657",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 4.32
+      },
+      {
+        "code": "sh.600967",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 8.7
+      },
+      {
+        "code": "sh.603086",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 5.1
+      },
+      {
+        "code": "sh.603188",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 3.67
+      },
+      {
+        "code": "sz.002534",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 12.03
+      },
+      {
+        "code": "sz.002992",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 58.14
+      },
+      {
+        "code": "sz.301511",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 15.98
+      }
+    ],
+    "selected": [
+      "sh.600650",
+      "sh.600657"
+    ],
+    "skipped_full": []
+  },
+  {
+    "date": "2025-01-15",
+    "available_slots": 2,
+    "candidates": [
+      {
+        "code": "sh.600128",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 12.0
+      },
+      {
+        "code": "sh.600202",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 5.86
+      },
+      {
+        "code": "sh.600615",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 12.22
+      },
+      {
+        "code": "sh.603086",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 5.51
+      },
+      {
+        "code": "sh.603111",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 7.11
+      },
+      {
+        "code": "sh.603166",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 9.95
+      },
+      {
+        "code": "sh.603991",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 57.0
+      },
+      {
+        "code": "sh.605378",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 20.2
+      },
+      {
+        "code": "sh.688365",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 13.19
+      },
+      {
+        "code": "sz.000055",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 4.23
+      },
+      {
+        "code": "sz.001282",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 22.76
+      },
+      {
+        "code": "sz.001314",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 45.73
+      },
+      {
+        "code": "sz.002133",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 2.58
+      },
+      {
+        "code": "sz.002165",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 4.48
+      },
+      {
+        "code": "sz.002213",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 14.26
+      },
+      {
+        "code": "sz.002497",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 12.8
+      },
+      {
+        "code": "sz.002692",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 4.6
+      },
+      {
+        "code": "sz.002901",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 33.63
+      },
+      {
+        "code": "sz.003010",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 26.51
+      },
+      {
+        "code": "sz.300141",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 9.88
+      },
+      {
+        "code": "sz.300323",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 8.19
+      },
+      {
+        "code": "sz.300959",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 52.9
+      },
+      {
+        "code": "sz.301001",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 43.4
+      },
+      {
+        "code": "sz.301110",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 68.2
+      },
+      {
+        "code": "sz.301252",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 36.58
+      }
+    ],
+    "selected": [
+      "sh.600128",
+      "sh.600202"
+    ],
+    "skipped_full": []
+  },
+  {
+    "date": "2025-01-16",
+    "available_slots": 3,
+    "candidates": [
+      {
+        "code": "sh.603637",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 8.77
+      },
+      {
+        "code": "sz.002969",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 3.21
+      },
+      {
+        "code": "sz.300058",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 9.88
+      }
+    ],
+    "selected": [
+      "sh.603637",
+      "sz.002969",
+      "sz.300058"
+    ],
+    "skipped_full": []
+  },
+  {
+    "date": "2025-01-17",
+    "available_slots": 2,
+    "candidates": [
+      {
+        "code": "sh.600137",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 15.57
+      },
+      {
+        "code": "sh.600981",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 2.91
+      },
+      {
+        "code": "sh.600984",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 3.56
+      },
+      {
+        "code": "sh.603212",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 10.75
+      },
+      {
+        "code": "sh.605337",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 12.0
+      },
+      {
+        "code": "sh.688426",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 27.4
+      },
+      {
+        "code": "sz.001206",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 20.23
+      },
+      {
+        "code": "sz.001222",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 16.78
+      },
+      {
+        "code": "sz.001236",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 10.11
+      },
+      {
+        "code": "sz.002115",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 7.5
+      },
+      {
+        "code": "sz.002164",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 6.99
+      },
+      {
+        "code": "sz.002636",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 9.38
+      },
+      {
+        "code": "sz.002712",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 6.21
+      },
+      {
+        "code": "sz.003030",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 16.12
+      },
+      {
+        "code": "sz.300242",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 5.39
+      },
+      {
+        "code": "sz.300792",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 37.22
+      },
+      {
+        "code": "sz.301315",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 64.0
+      }
+    ],
+    "selected": [
+      "sh.600137",
+      "sh.600981"
+    ],
+    "skipped_full": []
+  },
+  {
+    "date": "2025-01-20",
+    "available_slots": 3,
+    "candidates": [
+      {
+        "code": "sh.600556",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 6.37
+      },
+      {
+        "code": "sh.601100",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 63.03
+      },
+      {
+        "code": "sh.603069",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 18.73
+      },
+      {
+        "code": "sh.603511",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 17.9
+      },
+      {
+        "code": "sz.002212",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 6.85
+      },
+      {
+        "code": "sz.300394",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 110.33
+      }
+    ],
+    "selected": [
+      "sh.600556",
+      "sh.601100",
+      "sh.603069"
+    ],
+    "skipped_full": []
+  },
+  {
+    "date": "2025-01-21",
+    "available_slots": 1,
+    "candidates": [
+      {
+        "code": "sh.603082",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 43.29
+      },
+      {
+        "code": "sh.603511",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 16.93
+      },
+      {
+        "code": "sz.002250",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 6.03
+      },
+      {
+        "code": "sz.002543",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 13.13
+      },
+      {
+        "code": "sz.002688",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 4.69
+      },
+      {
+        "code": "sz.002787",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 8.89
+      },
+      {
+        "code": "sz.300515",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 18.72
+      }
+    ],
+    "selected": [],
+    "skipped_full": []
+  },
+  {
+    "date": "2025-01-22",
+    "available_slots": 2,
+    "candidates": [
+      {
+        "code": "sh.603717",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 8.7
+      },
+      {
+        "code": "sh.603800",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 25.93
+      },
+      {
+        "code": "sh.603901",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 8.11
+      },
+      {
+        "code": "sh.605058",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 23.0
+      },
+      {
+        "code": "sz.000006",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 7.1
+      },
+      {
+        "code": "sz.002636",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 10.47
+      },
+      {
+        "code": "sz.002729",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 15.49
+      },
+      {
+        "code": "sz.003041",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 29.9
+      },
+      {
+        "code": "sz.301503",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 39.87
+      }
+    ],
+    "selected": [
+      "sh.603717"
+    ],
+    "skipped_full": []
+  },
+  {
+    "date": "2025-01-23",
+    "available_slots": 4,
+    "candidates": [
+      {
+        "code": "sh.600579",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 10.2
+      },
+      {
+        "code": "sh.603155",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 14.32
+      },
+      {
+        "code": "sh.603211",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 21.6
+      },
+      {
+        "code": "sz.000882",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 3.27
+      },
+      {
+        "code": "sz.002296",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 10.8
+      }
+    ],
+    "selected": [
+      "sh.600579",
+      "sh.603155",
+      "sh.603211",
+      "sz.000882"
+    ],
+    "skipped_full": []
+  },
+  {
+    "date": "2025-01-24",
+    "available_slots": 5,
+    "candidates": [
+      {
+        "code": "sh.603803",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 11.1
+      },
+      {
+        "code": "sz.000856",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 10.4
+      },
+      {
+        "code": "sz.002453",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 5.73
+      },
+      {
+        "code": "sz.002666",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 4.79
+      }
+    ],
+    "selected": [
+      "sh.603803",
+      "sz.000856",
+      "sz.002453",
+      "sz.002666"
+    ],
+    "skipped_full": []
+  },
+  {
+    "date": "2025-01-27",
+    "available_slots": 5,
+    "candidates": [
+      {
+        "code": "sh.603286",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 22.5
+      },
+      {
+        "code": "sh.603915",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 14.6
+      },
+      {
+        "code": "sh.605277",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 18.0
+      },
+      {
+        "code": "sz.003033",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 31.01
+      }
+    ],
+    "selected": [
+      "sh.603286",
+      "sh.603915",
+      "sh.605277",
+      "sz.003033"
+    ],
+    "skipped_full": []
+  },
+  {
+    "date": "2025-02-05",
+    "available_slots": 4,
+    "candidates": [
+      {
+        "code": "sh.601515",
+        "star_count": 4,
+        "score": 4.0,
+        "strategy": "score_buy",
+        "buy_price": 2.96
+      },
+      {
+        "code": "sh.600936",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 3.33
+      },
+      {
+        "code": "sh.603039",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 63.0
+      },
+      {
+        "code": "sh.605338",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 18.42
+      },
+      {
+        "code": "sz.000856",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 11.46
+      },
+      {
+        "code": "sz.002530",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 12.3
+      },
+      {
+        "code": "sz.002718",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 17.0
+      },
+      {
+        "code": "sz.300654",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 13.34
+      }
+    ],
+    "selected": [
+      "sh.601515",
+      "sh.600936",
+      "sh.603039",
+      "sh.605338"
+    ],
+    "skipped_full": []
+  },
+  {
+    "date": "2025-02-06",
+    "available_slots": 4,
+    "candidates": [
+      {
+        "code": "sh.603716",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 7.5
+      },
+      {
+        "code": "sh.603880",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 4.59
+      },
+      {
+        "code": "sh.605069",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 7.67
+      },
+      {
+        "code": "sh.688229",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 41.77
+      },
+      {
+        "code": "sh.688716",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 41.28
+      },
+      {
+        "code": "sz.000158",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 19.0
+      },
+      {
+        "code": "sz.002137",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 8.15
+      },
+      {
+        "code": "sz.002313",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 9.3
+      },
+      {
+        "code": "sz.002380",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 21.21
+      },
+      {
+        "code": "sz.002394",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 7.55
+      },
+      {
+        "code": "sz.002398",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 5.07
+      },
+      {
+        "code": "sz.002747",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 19.01
+      },
+      {
+        "code": "sz.002760",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 17.07
+      },
+      {
+        "code": "sz.300383",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 15.6
+      },
+      {
+        "code": "sz.301082",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 13.9
+      },
+      {
+        "code": "sz.301182",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 34.98
+      }
+    ],
+    "selected": [
+      "sh.603716",
+      "sh.603880",
+      "sh.605069",
+      "sh.688229"
+    ],
+    "skipped_full": []
+  },
+  {
+    "date": "2025-02-07",
+    "available_slots": 2,
+    "candidates": [
+      {
+        "code": "sh.600183",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 27.8
+      },
+      {
+        "code": "sh.600589",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 3.91
+      },
+      {
+        "code": "sh.600797",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 7.48
+      },
+      {
+        "code": "sh.601360",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 12.84
+      },
+      {
+        "code": "sh.603039",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 67.0
+      },
+      {
+        "code": "sh.603496",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 25.19
+      },
+      {
+        "code": "sh.603596",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 60.6
+      },
+      {
+        "code": "sh.603636",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 13.27
+      },
+      {
+        "code": "sh.605299",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 9.29
+      },
+      {
+        "code": "sh.688023",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 63.2
+      },
+      {
+        "code": "sh.688039",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 33.64
+      },
+      {
+        "code": "sh.688205",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 100.0
+      },
+      {
+        "code": "sh.688313",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 17.46
+      },
+      {
+        "code": "sz.000815",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 10.65
+      },
+      {
+        "code": "sz.002067",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 3.99
+      },
+      {
+        "code": "sz.002123",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 12.8
+      },
+      {
+        "code": "sz.002819",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 27.9
+      },
+      {
+        "code": "sz.003005",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 34.29
+      },
+      {
+        "code": "sz.300229",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 27.51
+      },
+      {
+        "code": "sz.300251",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 13.68
+      },
+      {
+        "code": "sz.300253",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 7.9
+      },
+      {
+        "code": "sz.300476",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 48.0
+      },
+      {
+        "code": "sz.300570",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 99.81
+      },
+      {
+        "code": "sz.300846",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 17.01
+      },
+      {
+        "code": "sz.301306",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 41.1
+      },
+      {
+        "code": "sz.301387",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 35.79
+      }
+    ],
+    "selected": [
+      "sh.600183",
+      "sh.600589"
+    ],
+    "skipped_full": []
+  },
+  {
+    "date": "2025-02-10",
+    "available_slots": 2,
+    "candidates": [
+      {
+        "code": "sh.600186",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 6.82
+      },
+      {
+        "code": "sh.600595",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 3.46
+      },
+      {
+        "code": "sh.603197",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 44.0
+      },
+      {
+        "code": "sh.603786",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 71.58
+      },
+      {
+        "code": "sh.688023",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 69.56
+      },
+      {
+        "code": "sh.688058",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 36.8
+      },
+      {
+        "code": "sz.000532",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 16.77
+      },
+      {
+        "code": "sz.000810",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 14.26
+      },
+      {
+        "code": "sz.000868",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 6.3
+      },
+      {
+        "code": "sz.002354",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 7.39
+      },
+      {
+        "code": "sz.002413",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 4.65
+      },
+      {
+        "code": "sz.002448",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 7.89
+      },
+      {
+        "code": "sz.002526",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 4.25
+      },
+      {
+        "code": "sz.002594",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 326.91
+      },
+      {
+        "code": "sz.002600",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 10.19
+      },
+      {
+        "code": "sz.002913",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 29.27
+      },
+      {
+        "code": "sz.002920",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 133.58
+      },
+      {
+        "code": "sz.300382",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 12.84
+      },
+      {
+        "code": "sz.300766",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 41.01
+      }
+    ],
+    "selected": [
+      "sh.600186",
+      "sh.600595"
+    ],
+    "skipped_full": []
+  },
+  {
+    "date": "2025-02-11",
+    "available_slots": 2,
+    "candidates": [
+      {
+        "code": "sh.600120",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 7.5
+      },
+      {
+        "code": "sh.600785",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 12.9
+      },
+      {
+        "code": "sh.603150",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 33.07
+      },
+      {
+        "code": "sh.603390",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 12.0
+      },
+      {
+        "code": "sh.605228",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 10.8
+      },
+      {
+        "code": "sh.688158",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 30.01
+      },
+      {
+        "code": "sz.000536",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 5.38
+      },
+      {
+        "code": "sz.002044",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 5.55
+      },
+      {
+        "code": "sz.002448",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 8.09
+      },
+      {
+        "code": "sz.002520",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 6.89
+      },
+      {
+        "code": "sz.002824",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 17.9
+      },
+      {
+        "code": "sz.300057",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 6.0
+      }
+    ],
+    "selected": [
+      "sh.600120",
+      "sh.600785"
+    ],
+    "skipped_full": []
+  },
+  {
+    "date": "2025-02-12",
+    "available_slots": 3,
+    "candidates": [
+      {
+        "code": "sh.600178",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 12.51
+      },
+      {
+        "code": "sh.600979",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 5.2
+      },
+      {
+        "code": "sh.601929",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 2.2
+      },
+      {
+        "code": "sh.603270",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 27.69
+      },
+      {
+        "code": "sh.603803",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 13.8
+      },
+      {
+        "code": "sh.688078",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 40.0
+      },
+      {
+        "code": "sh.688151",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 18.17
+      },
+      {
+        "code": "sh.688272",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 23.33
+      },
+      {
+        "code": "sz.000032",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 20.11
+      },
+      {
+        "code": "sz.300603",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 12.95
+      }
+    ],
+    "selected": [
+      "sh.600178",
+      "sh.600979",
+      "sh.601929"
+    ],
+    "skipped_full": []
+  },
+  {
+    "date": "2025-02-13",
+    "available_slots": 1,
+    "candidates": [
+      {
+        "code": "sh.600666",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 2.98
+      },
+      {
+        "code": "sh.600739",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 11.74
+      },
+      {
+        "code": "sh.603067",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 15.23
+      },
+      {
+        "code": "sh.603300",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 8.46
+      },
+      {
+        "code": "sh.603900",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 6.35
+      },
+      {
+        "code": "sh.605016",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 18.96
+      },
+      {
+        "code": "sh.688078",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 43.8
+      },
+      {
+        "code": "sh.688316",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 91.91
+      },
+      {
+        "code": "sz.000156",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 10.24
+      },
+      {
+        "code": "sz.000818",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 27.68
+      },
+      {
+        "code": "sz.002835",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 22.3
+      },
+      {
+        "code": "sz.002881",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 72.0
+      },
+      {
+        "code": "sz.300220",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 20.91
+      }
+    ],
+    "selected": [],
+    "skipped_full": []
+  },
+  {
+    "date": "2025-02-14",
+    "available_slots": 3,
+    "candidates": [
+      {
+        "code": "sh.600172",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 4.56
+      },
+      {
+        "code": "sh.600173",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 5.4
+      },
+      {
+        "code": "sh.600516",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 5.28
+      },
+      {
+        "code": "sh.600611",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 7.52
+      },
+      {
+        "code": "sh.601116",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 12.8
+      },
+      {
+        "code": "sh.601162",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 4.83
+      },
+      {
+        "code": "sh.688135",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 23.13
+      },
+      {
+        "code": "sh.688316",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 93.0
+      },
+      {
+        "code": "sz.000785",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 5.47
+      },
+      {
+        "code": "sz.002153",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 8.58
+      },
+      {
+        "code": "sz.002649",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 17.0
+      },
+      {
+        "code": "sz.002811",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 11.08
+      },
+      {
+        "code": "sz.300249",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 17.29
+      },
+      {
+        "code": "sz.300491",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 20.28
+      }
+    ],
+    "selected": [
+      "sh.600172",
+      "sh.600173",
+      "sh.600516"
+    ],
+    "skipped_full": []
+  },
+  {
+    "date": "2025-02-17",
+    "available_slots": 3,
+    "candidates": [
+      {
+        "code": "sh.600126",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 11.51
+      },
+      {
+        "code": "sh.600439",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 3.93
+      },
+      {
+        "code": "sh.600633",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 17.4
+      },
+      {
+        "code": "sh.603086",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 5.4
+      },
+      {
+        "code": "sh.603682",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 5.98
+      },
+      {
+        "code": "sh.605298",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 13.48
+      },
+      {
+        "code": "sz.000702",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 8.1
+      },
+      {
+        "code": "sz.000785",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 5.43
+      },
+      {
+        "code": "sz.300530",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 24.48
+      },
+      {
+        "code": "sz.301238",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 18.85
+      }
+    ],
+    "selected": [
+      "sh.600126",
+      "sh.600439",
+      "sh.600633"
+    ],
+    "skipped_full": []
+  },
+  {
+    "date": "2025-02-18",
+    "available_slots": 2,
+    "candidates": [
+      {
+        "code": "sh.601116",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 13.43
+      },
+      {
+        "code": "sh.603086",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 6.0
+      },
+      {
+        "code": "sh.603739",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 13.51
+      },
+      {
+        "code": "sh.688246",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 37.02
+      },
+      {
+        "code": "sh.688315",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 18.99
+      },
+      {
+        "code": "sz.000948",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 21.07
+      },
+      {
+        "code": "sz.002622",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 3.59
+      },
+      {
+        "code": "sz.002881",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 58.0
+      },
+      {
+        "code": "sz.300530",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 24.99
+      },
+      {
+        "code": "sz.301459",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 57.03
+      },
+      {
+        "code": "sz.301585",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 53.76
+      }
+    ],
+    "selected": [
+      "sh.601116"
+    ],
+    "skipped_full": []
+  },
+  {
+    "date": "2025-02-19",
+    "available_slots": 3,
+    "candidates": [
+      {
+        "code": "sh.603917",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 12.92
+      },
+      {
+        "code": "sh.603956",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 9.23
+      },
+      {
+        "code": "sh.688393",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 33.35
+      },
+      {
+        "code": "sz.000816",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 3.56
+      },
+      {
+        "code": "sz.000967",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 5.7
+      },
+      {
+        "code": "sz.002616",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 5.37
+      },
+      {
+        "code": "sz.002893",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 11.25
+      },
+      {
+        "code": "sz.301459",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 64.0
+      }
+    ],
+    "selected": [
+      "sh.603917",
+      "sh.603956"
+    ],
+    "skipped_full": []
+  },
+  {
+    "date": "2025-02-20",
+    "available_slots": 3,
+    "candidates": [
+      {
+        "code": "sh.603881",
+        "star_count": 4,
+        "score": 4.0,
+        "strategy": "score_buy",
+        "buy_price": 34.05
+      },
+      {
+        "code": "sh.600058",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 7.63
+      },
+      {
+        "code": "sh.600884",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 7.57
+      },
+      {
+        "code": "sh.603082",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 43.8
+      },
+      {
+        "code": "sh.603906",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 11.7
+      },
+      {
+        "code": "sh.605378",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 24.41
+      },
+      {
+        "code": "sz.000065",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 11.64
+      },
+      {
+        "code": "sz.002065",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 12.88
+      },
+      {
+        "code": "sz.002121",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 4.84
+      },
+      {
+        "code": "sz.002328",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 6.85
+      },
+      {
+        "code": "sz.002453",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 6.02
+      },
+      {
+        "code": "sz.002866",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 18.09
+      },
+      {
+        "code": "sz.003013",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 16.51
+      },
+      {
+        "code": "sz.300490",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 9.4
+      },
+      {
+        "code": "sz.300571",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 42.0
+      },
+      {
+        "code": "sz.300648",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 27.1
+      },
+      {
+        "code": "sz.300894",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 15.23
+      }
+    ],
+    "selected": [
+      "sh.603881",
+      "sh.600058",
+      "sh.600884"
+    ],
+    "skipped_full": []
+  },
+  {
+    "date": "2025-02-21",
+    "available_slots": 5,
+    "candidates": [
+      {
+        "code": "sh.600376",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 2.98
+      },
+      {
+        "code": "sh.600933",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 20.68
+      },
+      {
+        "code": "sh.603004",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 24.96
+      },
+      {
+        "code": "sh.603489",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 25.79
+      },
+      {
+        "code": "sh.603665",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 18.26
+      },
+      {
+        "code": "sh.688381",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 25.25
+      },
+      {
+        "code": "sh.688611",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 57.0
+      },
+      {
+        "code": "sz.000928",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 6.88
+      },
+      {
+        "code": "sz.002046",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 15.55
+      },
+      {
+        "code": "sz.002065",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 13.59
+      },
+      {
+        "code": "sz.002357",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 8.52
+      },
+      {
+        "code": "sz.002937",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 20.03
+      }
+    ],
+    "selected": [
+      "sh.600376",
+      "sh.600933",
+      "sh.603004",
+      "sh.603489",
+      "sh.603665"
+    ],
+    "skipped_full": []
+  },
+  {
+    "date": "2025-02-24",
+    "available_slots": 3,
+    "candidates": [
+      {
+        "code": "sh.600316",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 35.57
+      },
+      {
+        "code": "sh.600835",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 22.65
+      },
+      {
+        "code": "sh.601177",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 17.88
+      },
+      {
+        "code": "sh.603511",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 15.16
+      },
+      {
+        "code": "sh.605286",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 37.54
+      },
+      {
+        "code": "sz.000547",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 7.81
+      },
+      {
+        "code": "sz.001314",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 57.0
+      },
+      {
+        "code": "sz.002277",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 5.9
+      },
+      {
+        "code": "sz.002733",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 18.69
+      },
+      {
+        "code": "sz.301300",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 31.87
+      },
+      {
+        "code": "sz.301336",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 70.68
+      }
+    ],
+    "selected": [
+      "sh.600316",
+      "sh.600835",
+      "sh.601177"
+    ],
+    "skipped_full": []
+  },
+  {
+    "date": "2025-02-25",
+    "available_slots": 4,
+    "candidates": [
+      {
+        "code": "sh.600710",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 10.38
+      },
+      {
+        "code": "sz.000581",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 21.01
+      }
+    ],
+    "selected": [
+      "sh.600710",
+      "sz.000581"
+    ],
+    "skipped_full": []
+  },
+  {
+    "date": "2025-02-26",
+    "available_slots": 2,
+    "candidates": [
+      {
+        "code": "sh.600841",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 5.96
+      },
+      {
+        "code": "sh.600984",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 3.58
+      },
+      {
+        "code": "sh.601869",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 42.92
+      },
+      {
+        "code": "sh.603118",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 12.34
+      },
+      {
+        "code": "sz.001223",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 54.99
+      },
+      {
+        "code": "sz.002034",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 17.62
+      },
+      {
+        "code": "sz.002080",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 15.29
+      },
+      {
+        "code": "sz.002361",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 5.8
+      },
+      {
+        "code": "sz.002369",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 13.49
+      },
+      {
+        "code": "sz.002522",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 5.99
+      },
+      {
+        "code": "sz.002760",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 19.4
+      },
+      {
+        "code": "sz.002765",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 13.74
+      },
+      {
+        "code": "sz.300148",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 5.5
+      },
+      {
+        "code": "sz.301139",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 36.36
+      },
+      {
+        "code": "sz.301382",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 60.18
+      }
+    ],
+    "selected": [
+      "sh.600841",
+      "sh.600984"
+    ],
+    "skipped_full": []
+  },
+  {
+    "date": "2025-02-27",
+    "available_slots": 2,
+    "candidates": [
+      {
+        "code": "sh.600280",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 3.78
+      },
+      {
+        "code": "sh.600810",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 8.38
+      },
+      {
+        "code": "sh.601113",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 4.41
+      },
+      {
+        "code": "sh.688182",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 25.88
+      },
+      {
+        "code": "sz.000892",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 5.07
+      },
+      {
+        "code": "sz.002824",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 20.0
+      },
+      {
+        "code": "sz.300214",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 7.9
+      },
+      {
+        "code": "sz.301090",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 8.32
+      },
+      {
+        "code": "sz.301181",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 26.9
+      }
+    ],
+    "selected": [
+      "sh.600280"
+    ],
+    "skipped_full": []
+  },
+  {
+    "date": "2025-02-28",
+    "available_slots": 2,
+    "candidates": [
+      {
+        "code": "sh.600094",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 3.77
+      },
+      {
+        "code": "sh.600782",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 4.4
+      },
+      {
+        "code": "sh.601881",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 17.5
+      },
+      {
+        "code": "sh.601995",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 37.18
+      },
+      {
+        "code": "sh.603496",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 37.88
+      },
+      {
+        "code": "sh.603663",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 26.04
+      },
+      {
+        "code": "sz.000566",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 5.37
+      },
+      {
+        "code": "sz.002048",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 16.18
+      },
+      {
+        "code": "sz.002110",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 4.24
+      },
+      {
+        "code": "sz.002654",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 14.96
+      },
+      {
+        "code": "sz.002769",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 8.15
+      },
+      {
+        "code": "sz.300031",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 39.5
+      },
+      {
+        "code": "sz.301003",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 33.13
+      }
+    ],
+    "selected": [
+      "sh.600094"
+    ],
+    "skipped_full": []
+  },
+  {
+    "date": "2025-03-03",
+    "available_slots": 3,
+    "candidates": [
+      {
+        "code": "sh.600210",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 7.3
+      },
+      {
+        "code": "sh.600212",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 8.39
+      },
+      {
+        "code": "sh.600589",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 7.34
+      },
+      {
+        "code": "sh.600778",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 7.1
+      },
+      {
+        "code": "sh.603072",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 38.44
+      },
+      {
+        "code": "sh.603336",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 4.86
+      },
+      {
+        "code": "sh.605179",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 21.9
+      },
+      {
+        "code": "sz.002163",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 9.9
+      },
+      {
+        "code": "sz.002187",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 7.55
+      },
+      {
+        "code": "sz.002298",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 7.88
+      },
+      {
+        "code": "sz.300746",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 14.33
+      },
+      {
+        "code": "sz.300915",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 38.5
+      }
+    ],
+    "selected": [
+      "sh.600210",
+      "sh.600212"
+    ],
+    "skipped_full": []
+  },
+  {
+    "date": "2025-03-04",
+    "available_slots": 4,
+    "candidates": [
+      {
+        "code": "sh.603990",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 14.56
+      },
+      {
+        "code": "sh.605178",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 17.43
+      },
+      {
+        "code": "sh.688058",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 32.85
+      },
+      {
+        "code": "sh.688258",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 41.82
+      },
+      {
+        "code": "sh.688507",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 79.7
+      },
+      {
+        "code": "sz.000036",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 4.32
+      },
+      {
+        "code": "sz.000980",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 2.61
+      },
+      {
+        "code": "sz.002140",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 10.3
+      },
+      {
+        "code": "sz.002178",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 7.45
+      },
+      {
+        "code": "sz.002517",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 15.97
+      },
+      {
+        "code": "sz.002929",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 55.1
+      },
+      {
+        "code": "sz.300996",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 23.88
+      },
+      {
+        "code": "sz.301022",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 29.0
+      },
+      {
+        "code": "sz.301368",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 80.83
+      },
+      {
+        "code": "sz.301413",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 93.0
+      }
+    ],
+    "selected": [
+      "sh.603990",
+      "sh.605178",
+      "sh.688058",
+      "sh.688258"
+    ],
+    "skipped_full": []
+  },
+  {
+    "date": "2025-03-05",
+    "available_slots": 3,
+    "candidates": [
+      {
+        "code": "sh.600281",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 3.69
+      },
+      {
+        "code": "sh.600619",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 13.5
+      },
+      {
+        "code": "sh.603011",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 8.41
+      },
+      {
+        "code": "sh.603032",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 16.2
+      },
+      {
+        "code": "sh.603200",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 38.19
+      },
+      {
+        "code": "sh.603399",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 10.01
+      },
+      {
+        "code": "sh.603630",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 14.06
+      },
+      {
+        "code": "sh.603876",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 9.75
+      },
+      {
+        "code": "sz.000058",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 9.0
+      },
+      {
+        "code": "sz.002326",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 11.51
+      },
+      {
+        "code": "sz.300619",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 30.87
+      }
+    ],
+    "selected": [
+      "sh.600281",
+      "sh.600619",
+      "sh.603011"
+    ],
+    "skipped_full": []
+  },
+  {
+    "date": "2025-03-06",
+    "available_slots": 2,
+    "candidates": [
+      {
+        "code": "sh.603178",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 22.36
+      },
+      {
+        "code": "sh.603810",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 13.52
+      },
+      {
+        "code": "sh.603931",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 29.79
+      },
+      {
+        "code": "sh.605228",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 11.72
+      },
+      {
+        "code": "sh.688107",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 37.2
+      },
+      {
+        "code": "sz.300183",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 25.0
+      }
+    ],
+    "selected": [
+      "sh.603178",
+      "sh.603810"
+    ],
+    "skipped_full": []
+  },
+  {
+    "date": "2025-03-07",
+    "available_slots": 2,
+    "candidates": [
+      {
+        "code": "sh.600318",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 8.6
+      },
+      {
+        "code": "sh.600343",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 11.8
+      },
+      {
+        "code": "sh.600751",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 2.99
+      },
+      {
+        "code": "sh.603386",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 13.52
+      },
+      {
+        "code": "sh.603958",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 17.0
+      },
+      {
+        "code": "sz.000797",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 2.91
+      },
+      {
+        "code": "sz.001298",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 30.8
+      },
+      {
+        "code": "sz.002194",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 13.52
+      },
+      {
+        "code": "sz.002418",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 3.79
+      },
+      {
+        "code": "sz.002526",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 4.66
+      },
+      {
+        "code": "sz.300964",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 46.08
+      }
+    ],
+    "selected": [
+      "sh.600318",
+      "sh.600343"
+    ],
+    "skipped_full": []
+  },
+  {
+    "date": "2025-03-10",
+    "available_slots": 1,
+    "candidates": [
+      {
+        "code": "sh.600588",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 19.2
+      },
+      {
+        "code": "sh.600592",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 20.7
+      },
+      {
+        "code": "sh.603088",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 11.64
+      },
+      {
+        "code": "sh.603270",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 28.29
+      },
+      {
+        "code": "sh.603300",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 12.03
+      },
+      {
+        "code": "sh.605069",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 9.18
+      },
+      {
+        "code": "sh.688096",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 12.8
+      },
+      {
+        "code": "sz.001319",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 33.49
+      },
+      {
+        "code": "sz.002101",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 14.6
+      },
+      {
+        "code": "sz.002105",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 8.0
+      },
+      {
+        "code": "sz.002236",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 19.23
+      },
+      {
+        "code": "sz.300058",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 10.91
+      },
+      {
+        "code": "sz.300248",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 17.75
+      },
+      {
+        "code": "sz.300819",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 21.32
+      }
+    ],
+    "selected": [
+      "sh.600588"
+    ],
+    "skipped_full": []
+  },
+  {
+    "date": "2025-03-11",
+    "available_slots": 3,
+    "candidates": [
+      {
+        "code": "sh.600361",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 4.36
+      },
+      {
+        "code": "sh.605069",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 9.25
+      },
+      {
+        "code": "sz.002105",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 9.0
+      },
+      {
+        "code": "sz.002757",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 24.01
+      },
+      {
+        "code": "sz.300938",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 43.02
+      },
+      {
+        "code": "sz.301225",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 42.36
+      }
+    ],
+    "selected": [
+      "sh.600361",
+      "sh.605069",
+      "sz.002105"
+    ],
+    "skipped_full": []
+  },
+  {
+    "date": "2025-03-12",
+    "available_slots": 3,
+    "candidates": [
+      {
+        "code": "sh.600184",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 14.49
+      },
+      {
+        "code": "sh.600403",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 3.19
+      },
+      {
+        "code": "sh.600610",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 5.16
+      },
+      {
+        "code": "sh.600641",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 16.19
+      },
+      {
+        "code": "sh.600712",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 6.36
+      },
+      {
+        "code": "sh.600802",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 4.59
+      },
+      {
+        "code": "sh.600829",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 8.59
+      },
+      {
+        "code": "sh.600860",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 14.96
+      },
+      {
+        "code": "sh.600960",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 4.07
+      },
+      {
+        "code": "sh.603300",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 12.51
+      },
+      {
+        "code": "sh.603489",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 30.7
+      },
+      {
+        "code": "sh.603506",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 10.33
+      },
+      {
+        "code": "sh.603588",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 6.5
+      },
+      {
+        "code": "sh.688395",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 27.5
+      },
+      {
+        "code": "sh.688680",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 50.52
+      },
+      {
+        "code": "sz.000581",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 28.94
+      },
+      {
+        "code": "sz.002093",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 11.38
+      },
+      {
+        "code": "sz.002099",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 5.2
+      },
+      {
+        "code": "sz.002114",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 7.78
+      },
+      {
+        "code": "sz.002205",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 10.45
+      },
+      {
+        "code": "sz.002622",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 3.14
+      },
+      {
+        "code": "sz.002760",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 27.81
+      },
+      {
+        "code": "sz.002773",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 22.7
+      },
+      {
+        "code": "sz.002992",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 74.69
+      }
+    ],
+    "selected": [
+      "sh.600184",
+      "sh.600403",
+      "sh.600610"
+    ],
+    "skipped_full": []
+  },
+  {
+    "date": "2025-03-13",
+    "available_slots": 2,
+    "candidates": [
+      {
+        "code": "sh.600967",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 12.8
+      },
+      {
+        "code": "sh.603326",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 8.43
+      },
+      {
+        "code": "sh.603716",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 12.75
+      },
+      {
+        "code": "sh.605155",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 13.88
+      },
+      {
+        "code": "sz.000014",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 11.15
+      },
+      {
+        "code": "sz.000815",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 14.5
+      },
+      {
+        "code": "sz.002292",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 10.68
+      },
+      {
+        "code": "sz.002921",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 17.68
+      },
+      {
+        "code": "sz.301176",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 21.5
+      }
+    ],
+    "selected": [
+      "sh.600967",
+      "sh.603326"
+    ],
+    "skipped_full": []
+  },
+  {
+    "date": "2025-03-14",
+    "available_slots": 4,
+    "candidates": [
+      {
+        "code": "sh.600399",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 6.51
+      },
+      {
+        "code": "sz.000503",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 12.51
+      },
+      {
+        "code": "sz.000665",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 7.0
+      },
+      {
+        "code": "sz.000791",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 6.35
+      },
+      {
+        "code": "sz.002638",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 2.44
+      },
+      {
+        "code": "sz.002730",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 21.0
+      },
+      {
+        "code": "sz.002927",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 16.05
+      }
+    ],
+    "selected": [
+      "sh.600399",
+      "sz.000503",
+      "sz.000665",
+      "sz.000791"
+    ],
+    "skipped_full": []
+  },
+  {
+    "date": "2025-03-17",
+    "available_slots": 2,
+    "candidates": [
+      {
+        "code": "sz.002979",
+        "star_count": 4,
+        "score": 4.0,
+        "strategy": "score_buy",
+        "buy_price": 50.88
+      },
+      {
+        "code": "sh.600456",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 36.8
+      },
+      {
+        "code": "sh.603102",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 39.56
+      },
+      {
+        "code": "sz.000813",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 3.81
+      },
+      {
+        "code": "sz.002238",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 10.1
+      },
+      {
+        "code": "sz.300126",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 7.9
+      },
+      {
+        "code": "sz.300680",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 45.68
+      },
+      {
+        "code": "sz.300695",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 76.0
+      }
+    ],
+    "selected": [
+      "sz.002979"
+    ],
+    "skipped_full": []
+  },
+  {
+    "date": "2025-03-18",
+    "available_slots": 2,
+    "candidates": [
+      {
+        "code": "sh.600300",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 3.62
+      },
+      {
+        "code": "sh.603238",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 16.0
+      },
+      {
+        "code": "sh.605009",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 46.35
+      },
+      {
+        "code": "sz.001209",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 19.5
+      },
+      {
+        "code": "sz.001318",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 14.17
+      },
+      {
+        "code": "sz.002574",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 7.88
+      },
+      {
+        "code": "sz.002905",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 10.02
+      },
+      {
+        "code": "sz.300065",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 17.1
+      },
+      {
+        "code": "sz.300380",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 56.7
+      },
+      {
+        "code": "sz.300898",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 35.88
+      }
+    ],
+    "selected": [
+      "sh.600300",
+      "sh.603238"
+    ],
+    "skipped_full": []
+  },
+  {
+    "date": "2025-03-19",
+    "available_slots": 2,
+    "candidates": [
+      {
+        "code": "sh.600708",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 3.69
+      },
+      {
+        "code": "sh.603214",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 22.68
+      },
+      {
+        "code": "sz.000062",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 25.6
+      },
+      {
+        "code": "sz.001914",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 12.05
+      },
+      {
+        "code": "sz.002034",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 20.37
+      },
+      {
+        "code": "sz.002086",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 3.4
+      },
+      {
+        "code": "sz.002329",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 3.8
+      },
+      {
+        "code": "sz.002574",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 8.32
+      },
+      {
+        "code": "sz.300191",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 18.21
+      },
+      {
+        "code": "sz.300720",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 26.77
+      },
+      {
+        "code": "sz.301053",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 28.46
+      }
+    ],
+    "selected": [
+      "sh.600708"
+    ],
+    "skipped_full": []
+  },
+  {
+    "date": "2025-03-20",
+    "available_slots": 3,
+    "candidates": [
+      {
+        "code": "sh.603266",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 18.73
+      },
+      {
+        "code": "sh.603677",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 27.73
+      },
+      {
+        "code": "sh.603757",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 26.16
+      },
+      {
+        "code": "sh.688190",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 117.78
+      },
+      {
+        "code": "sz.002342",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 5.39
+      },
+      {
+        "code": "sz.002715",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 17.6
+      },
+      {
+        "code": "sz.002724",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 7.07
+      },
+      {
+        "code": "sz.300713",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 20.52
+      }
+    ],
+    "selected": [
+      "sh.603266",
+      "sh.603677"
+    ],
+    "skipped_full": []
+  },
+  {
+    "date": "2025-03-21",
+    "available_slots": 3,
+    "candidates": [
+      {
+        "code": "sh.600178",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 13.53
+      },
+      {
+        "code": "sh.601619",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 3.9
+      },
+      {
+        "code": "sh.603072",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 42.0
+      },
+      {
+        "code": "sh.603315",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 17.79
+      },
+      {
+        "code": "sz.000601",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 5.28
+      },
+      {
+        "code": "sz.001268",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 26.0
+      },
+      {
+        "code": "sz.002278",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 10.73
+      },
+      {
+        "code": "sz.002535",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 4.72
+      },
+      {
+        "code": "sz.002570",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 5.24
+      },
+      {
+        "code": "sz.002633",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 14.24
+      },
+      {
+        "code": "sz.002645",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 8.86
+      },
+      {
+        "code": "sz.002890",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 12.21
+      }
+    ],
+    "selected": [
+      "sh.600178",
+      "sh.601619"
+    ],
+    "skipped_full": []
+  },
+  {
+    "date": "2025-03-24",
+    "available_slots": 4,
+    "candidates": [
+      {
+        "code": "sh.600876",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 10.4
+      },
+      {
+        "code": "sh.601015",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 3.47
+      },
+      {
+        "code": "sh.601218",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 3.6
+      },
+      {
+        "code": "sh.601886",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 6.31
+      },
+      {
+        "code": "sz.000601",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 5.06
+      },
+      {
+        "code": "sz.001239",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 19.4
+      },
+      {
+        "code": "sz.002164",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 10.26
+      },
+      {
+        "code": "sz.002655",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 15.15
+      },
+      {
+        "code": "sz.300084",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 9.0
+      },
+      {
+        "code": "sz.301298",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 19.5
+      }
+    ],
+    "selected": [
+      "sh.600876",
+      "sh.601015",
+      "sh.601218",
+      "sh.601886"
+    ],
+    "skipped_full": []
+  },
+  {
+    "date": "2025-03-25",
+    "available_slots": 4,
+    "candidates": [
+      {
+        "code": "sh.601226",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 7.57
+      },
+      {
+        "code": "sh.603686",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 14.14
+      },
+      {
+        "code": "sh.603949",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 23.01
+      },
+      {
+        "code": "sz.000753",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 5.08
+      },
+      {
+        "code": "sz.000852",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 8.27
+      },
+      {
+        "code": "sz.002554",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 2.9
+      },
+      {
+        "code": "sz.300353",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 21.03
+      }
+    ],
+    "selected": [
+      "sh.601226",
+      "sh.603686",
+      "sh.603949"
+    ],
+    "skipped_full": []
+  },
+  {
+    "date": "2025-03-26",
+    "available_slots": 4,
+    "candidates": [
+      {
+        "code": "sh.600403",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 4.17
+      },
+      {
+        "code": "sh.600470",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 6.75
+      },
+      {
+        "code": "sh.600882",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 21.08
+      },
+      {
+        "code": "sh.603466",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 10.31
+      },
+      {
+        "code": "sh.603999",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 6.7
+      },
+      {
+        "code": "sz.000422",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 15.8
+      },
+      {
+        "code": "sz.000558",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 3.69
+      },
+      {
+        "code": "sz.000888",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 15.03
+      },
+      {
+        "code": "sz.002204",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 7.5
+      },
+      {
+        "code": "sz.002520",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 7.3
+      },
+      {
+        "code": "sz.002735",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 10.8
+      },
+      {
+        "code": "sz.002767",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 20.71
+      },
+      {
+        "code": "sz.002861",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 16.49
+      },
+      {
+        "code": "sz.300697",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 20.38
+      }
+    ],
+    "selected": [
+      "sh.600403",
+      "sh.600470",
+      "sh.600882"
+    ],
+    "skipped_full": []
+  },
+  {
+    "date": "2025-03-27",
+    "available_slots": 5,
+    "candidates": [
+      {
+        "code": "sh.600367",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 15.72
+      },
+      {
+        "code": "sh.600468",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 5.35
+      },
+      {
+        "code": "sh.603015",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 14.05
+      },
+      {
+        "code": "sh.603081",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 14.51
+      },
+      {
+        "code": "sh.603169",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 6.52
+      },
+      {
+        "code": "sh.603188",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 3.83
+      },
+      {
+        "code": "sh.605069",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 12.0
+      },
+      {
+        "code": "sz.000822",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 6.49
+      },
+      {
+        "code": "sz.002276",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 15.44
+      },
+      {
+        "code": "sz.002300",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 8.5
+      },
+      {
+        "code": "sz.002765",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 15.49
+      },
+      {
+        "code": "sz.300927",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 30.88
+      },
+      {
+        "code": "sz.301082",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 17.89
+      }
+    ],
+    "selected": [
+      "sh.600367",
+      "sh.600468",
+      "sh.603015",
+      "sh.603081",
+      "sh.603169"
+    ],
+    "skipped_full": []
+  },
+  {
+    "date": "2025-03-28",
+    "available_slots": 5,
+    "candidates": [
+      {
+        "code": "sh.600128",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 10.3
+      },
+      {
+        "code": "sh.600156",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 5.78
+      },
+      {
+        "code": "sh.600789",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 10.88
+      },
+      {
+        "code": "sh.688591",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 42.35
+      },
+      {
+        "code": "sz.000633",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 5.72
+      },
+      {
+        "code": "sz.000837",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 14.13
+      },
+      {
+        "code": "sz.000958",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 6.47
+      },
+      {
+        "code": "sz.001359",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 31.44
+      },
+      {
+        "code": "sz.002206",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 5.05
+      },
+      {
+        "code": "sz.300927",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 31.8
+      }
+    ],
+    "selected": [
+      "sh.600128",
+      "sh.600156",
+      "sh.600789",
+      "sh.688591",
+      "sz.000633"
+    ],
+    "skipped_full": []
+  },
+  {
+    "date": "2025-03-31",
+    "available_slots": 3,
+    "candidates": [
+      {
+        "code": "sh.600319",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 5.73
+      },
+      {
+        "code": "sh.600589",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 6.7
+      },
+      {
+        "code": "sh.603938",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 13.04
+      },
+      {
+        "code": "sz.000006",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 7.8
+      },
+      {
+        "code": "sz.000953",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 6.16
+      },
+      {
+        "code": "sz.002773",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 25.0
+      },
+      {
+        "code": "sz.300871",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 24.32
+      },
+      {
+        "code": "sz.301118",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 21.45
+      },
+      {
+        "code": "sz.301190",
+        "star_count": 3,
+        "score": 3.0,
+        "strategy": "score_buy",
+        "buy_price": 22.62
+      }
+    ],
+    "selected": [
+      "sh.600319",
+      "sh.600589"
+    ],
+    "skipped_full": []
+  }
+]

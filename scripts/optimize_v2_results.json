@@ -1,0 +1,614 @@
+{
+  "top_results": [
+    {
+      "rank": 1,
+      "params": {
+        "min_stars": 4,
+        "tp_pct": 5,
+        "sl_pct": -2,
+        "max_hold_days": 3,
+        "n_slots": 3,
+        "indicators": {
+          "big_drop_gap_up": {
+            "weight": 1.0,
+            "star_condition": ">0.5",
+            "drop_threshold": -5.0,
+            "gap_min": 2.0,
+            "gap_max": 20.0
+          },
+          "limit_down_reversal": {
+            "weight": 1.0,
+            "star_condition": ">0.5"
+          },
+          "limit_up_next": {
+            "weight": 1.0,
+            "star_condition": ">0.5"
+          },
+          "cum_drop_first_positive": {
+            "weight": 1.0,
+            "star_condition": ">0.5",
+            "lookback": 8,
+            "cum_drop_threshold": -5.0
+          },
+          "volume_breakout": {
+            "weight": 1.0,
+            "star_condition": ">0.5",
+            "lookback": 5,
+            "ratio": 2.0
+          },
+          "amplitude_positive": {
+            "weight": 1.0,
+            "star_condition": ">0.5",
+            "amp_threshold": 10.0
+          },
+          "rsi_oversold_bounce": {
+            "weight": 1.0,
+            "star_condition": ">0.5",
+            "period": 14,
+            "oversold": 30.0
+          }
+        }
+      },
+      "train": {
+        "cagr": 211.74,
+        "mdd": -18.14,
+        "calmar": 11.67,
+        "sharpe": 2.89,
+        "trades": 166,
+        "win_rate": 69.3,
+        "total_return": 2903.8,
+        "yearly": {
+          "2023": {
+            "return": 200.5,
+            "trades": 48,
+            "win_rate": 70.8
+          },
+          "2024": {
+            "return": 173.1,
+            "trades": 68,
+            "win_rate": 64.7
+          },
+          "2025": {
+            "return": 269.9,
+            "trades": 50,
+            "win_rate": 74.0
+          }
+        }
+      },
+      "full": {
+        "cagr": 284.04,
+        "mdd": -22.3,
+        "calmar": 12.74,
+        "sharpe": 3.28,
+        "trades": 367,
+        "win_rate": 71.1,
+        "total_return": 621375.7,
+        "yearly": {
+          "2020": {
+            "return": 309.0,
+            "trades": 48,
+            "win_rate": 75.0
+          },
+          "2021": {
+            "return": 263.6,
+            "trades": 64,
+            "win_rate": 70.3
+          },
+          "2022": {
+            "return": 450.7,
+            "trades": 55,
+            "win_rate": 72.7
+          },
+          "2023": {
+            "return": 200.1,
+            "trades": 51,
+            "win_rate": 70.6
+          },
+          "2024": {
+            "return": 173.2,
+            "trades": 68,
+            "win_rate": 64.7
+          },
+          "2025": {
+            "return": 270.3,
+            "trades": 50,
+            "win_rate": 74.0
+          },
+          "2026": {
+            "return": 141.6,
+            "trades": 31,
+            "win_rate": 74.2
+          }
+        }
+      }
+    },
+    {
+      "rank": 2,
+      "params": {
+        "min_stars": 4,
+        "tp_pct": 5,
+        "sl_pct": -3,
+        "max_hold_days": 3,
+        "n_slots": 3,
+        "indicators": {
+          "big_drop_gap_up": {
+            "weight": 1.0,
+            "star_condition": ">0.5",
+            "drop_threshold": -5.0,
+            "gap_min": 2.0,
+            "gap_max": 20.0
+          },
+          "limit_down_reversal": {
+            "weight": 1.0,
+            "star_condition": ">0.5"
+          },
+          "limit_up_next": {
+            "weight": 1.0,
+            "star_condition": ">0.5"
+          },
+          "cum_drop_first_positive": {
+            "weight": 1.0,
+            "star_condition": ">0.5",
+            "lookback": 8,
+            "cum_drop_threshold": -5.0
+          },
+          "volume_breakout": {
+            "weight": 1.0,
+            "star_condition": ">0.5",
+            "lookback": 5,
+            "ratio": 2.0
+          },
+          "amplitude_positive": {
+            "weight": 1.0,
+            "star_condition": ">0.5",
+            "amp_threshold": 10.0
+          },
+          "rsi_oversold_bounce": {
+            "weight": 1.0,
+            "star_condition": ">0.5",
+            "period": 14,
+            "oversold": 30.0
+          }
+        }
+      },
+      "train": {
+        "cagr": 211.74,
+        "mdd": -18.14,
+        "calmar": 11.67,
+        "sharpe": 2.89,
+        "trades": 166,
+        "win_rate": 69.3,
+        "total_return": 2903.8,
+        "yearly": {
+          "2023": {
+            "return": 200.5,
+            "trades": 48,
+            "win_rate": 70.8
+          },
+          "2024": {
+            "return": 173.1,
+            "trades": 68,
+            "win_rate": 64.7
+          },
+          "2025": {
+            "return": 269.9,
+            "trades": 50,
+            "win_rate": 74.0
+          }
+        }
+      },
+      "full": {
+        "cagr": 284.04,
+        "mdd": -22.3,
+        "calmar": 12.74,
+        "sharpe": 3.28,
+        "trades": 367,
+        "win_rate": 71.1,
+        "total_return": 621375.7,
+        "yearly": {
+          "2020": {
+            "return": 309.0,
+            "trades": 48,
+            "win_rate": 75.0
+          },
+          "2021": {
+            "return": 263.6,
+            "trades": 64,
+            "win_rate": 70.3
+          },
+          "2022": {
+            "return": 450.7,
+            "trades": 55,
+            "win_rate": 72.7
+          },
+          "2023": {
+            "return": 200.1,
+            "trades": 51,
+            "win_rate": 70.6
+          },
+          "2024": {
+            "return": 173.2,
+            "trades": 68,
+            "win_rate": 64.7
+          },
+          "2025": {
+            "return": 270.3,
+            "trades": 50,
+            "win_rate": 74.0
+          },
+          "2026": {
+            "return": 141.6,
+            "trades": 31,
+            "win_rate": 74.2
+          }
+        }
+      }
+    },
+    {
+      "rank": 3,
+      "params": {
+        "min_stars": 4,
+        "tp_pct": 5,
+        "sl_pct": -5,
+        "max_hold_days": 3,
+        "n_slots": 3,
+        "indicators": {
+          "big_drop_gap_up": {
+            "weight": 1.0,
+            "star_condition": ">0.5",
+            "drop_threshold": -5.0,
+            "gap_min": 2.0,
+            "gap_max": 20.0
+          },
+          "limit_down_reversal": {
+            "weight": 1.0,
+            "star_condition": ">0.5"
+          },
+          "limit_up_next": {
+            "weight": 1.0,
+            "star_condition": ">0.5"
+          },
+          "cum_drop_first_positive": {
+            "weight": 1.0,
+            "star_condition": ">0.5",
+            "lookback": 8,
+            "cum_drop_threshold": -5.0
+          },
+          "volume_breakout": {
+            "weight": 1.0,
+            "star_condition": ">0.5",
+            "lookback": 5,
+            "ratio": 2.0
+          },
+          "amplitude_positive": {
+            "weight": 1.0,
+            "star_condition": ">0.5",
+            "amp_threshold": 10.0
+          },
+          "rsi_oversold_bounce": {
+            "weight": 1.0,
+            "star_condition": ">0.5",
+            "period": 14,
+            "oversold": 30.0
+          }
+        }
+      },
+      "train": {
+        "cagr": 211.74,
+        "mdd": -18.14,
+        "calmar": 11.67,
+        "sharpe": 2.89,
+        "trades": 166,
+        "win_rate": 69.3,
+        "total_return": 2903.8,
+        "yearly": {
+          "2023": {
+            "return": 200.5,
+            "trades": 48,
+            "win_rate": 70.8
+          },
+          "2024": {
+            "return": 173.1,
+            "trades": 68,
+            "win_rate": 64.7
+          },
+          "2025": {
+            "return": 269.9,
+            "trades": 50,
+            "win_rate": 74.0
+          }
+        }
+      },
+      "full": {
+        "cagr": 284.04,
+        "mdd": -22.3,
+        "calmar": 12.74,
+        "sharpe": 3.28,
+        "trades": 367,
+        "win_rate": 71.1,
+        "total_return": 621375.7,
+        "yearly": {
+          "2020": {
+            "return": 309.0,
+            "trades": 48,
+            "win_rate": 75.0
+          },
+          "2021": {
+            "return": 263.6,
+            "trades": 64,
+            "win_rate": 70.3
+          },
+          "2022": {
+            "return": 450.7,
+            "trades": 55,
+            "win_rate": 72.7
+          },
+          "2023": {
+            "return": 200.1,
+            "trades": 51,
+            "win_rate": 70.6
+          },
+          "2024": {
+            "return": 173.2,
+            "trades": 68,
+            "win_rate": 64.7
+          },
+          "2025": {
+            "return": 270.3,
+            "trades": 50,
+            "win_rate": 74.0
+          },
+          "2026": {
+            "return": 141.6,
+            "trades": 31,
+            "win_rate": 74.2
+          }
+        }
+      }
+    },
+    {
+      "rank": 4,
+      "params": {
+        "min_stars": 4,
+        "tp_pct": 8,
+        "sl_pct": -2,
+        "max_hold_days": 3,
+        "n_slots": 3,
+        "indicators": {
+          "big_drop_gap_up": {
+            "weight": 1.0,
+            "star_condition": ">0.5",
+            "drop_threshold": -5.0,
+            "gap_min": 2.0,
+            "gap_max": 20.0
+          },
+          "limit_down_reversal": {
+            "weight": 1.0,
+            "star_condition": ">0.5"
+          },
+          "limit_up_next": {
+            "weight": 1.0,
+            "star_condition": ">0.5"
+          },
+          "cum_drop_first_positive": {
+            "weight": 1.0,
+            "star_condition": ">0.5",
+            "lookback": 8,
+            "cum_drop_threshold": -5.0
+          },
+          "volume_breakout": {
+            "weight": 1.0,
+            "star_condition": ">0.5",
+            "lookback": 5,
+            "ratio": 2.0
+          },
+          "amplitude_positive": {
+            "weight": 1.0,
+            "star_condition": ">0.5",
+            "amp_threshold": 10.0
+          },
+          "rsi_oversold_bounce": {
+            "weight": 1.0,
+            "star_condition": ">0.5",
+            "period": 14,
+            "oversold": 30.0
+          }
+        }
+      },
+      "train": {
+        "cagr": 211.74,
+        "mdd": -18.14,
+        "calmar": 11.67,
+        "sharpe": 2.89,
+        "trades": 166,
+        "win_rate": 69.3,
+        "total_return": 2903.8,
+        "yearly": {
+          "2023": {
+            "return": 200.5,
+            "trades": 48,
+            "win_rate": 70.8
+          },
+          "2024": {
+            "return": 173.1,
+            "trades": 68,
+            "win_rate": 64.7
+          },
+          "2025": {
+            "return": 269.9,
+            "trades": 50,
+            "win_rate": 74.0
+          }
+        }
+      },
+      "full": {
+        "cagr": 284.04,
+        "mdd": -22.3,
+        "calmar": 12.74,
+        "sharpe": 3.28,
+        "trades": 367,
+        "win_rate": 71.1,
+        "total_return": 621375.7,
+        "yearly": {
+          "2020": {
+            "return": 309.0,
+            "trades": 48,
+            "win_rate": 75.0
+          },
+          "2021": {
+            "return": 263.6,
+            "trades": 64,
+            "win_rate": 70.3
+          },
+          "2022": {
+            "return": 450.7,
+            "trades": 55,
+            "win_rate": 72.7
+          },
+          "2023": {
+            "return": 200.1,
+            "trades": 51,
+            "win_rate": 70.6
+          },
+          "2024": {
+            "return": 173.2,
+            "trades": 68,
+            "win_rate": 64.7
+          },
+          "2025": {
+            "return": 270.3,
+            "trades": 50,
+            "win_rate": 74.0
+          },
+          "2026": {
+            "return": 141.6,
+            "trades": 31,
+            "win_rate": 74.2
+          }
+        }
+      }
+    },
+    {
+      "rank": 5,
+      "params": {
+        "min_stars": 4,
+        "tp_pct": 8,
+        "sl_pct": -3,
+        "max_hold_days": 3,
+        "n_slots": 3,
+        "indicators": {
+          "big_drop_gap_up": {
+            "weight": 1.0,
+            "star_condition": ">0.5",
+            "drop_threshold": -5.0,
+            "gap_min": 2.0,
+            "gap_max": 20.0
+          },
+          "limit_down_reversal": {
+            "weight": 1.0,
+            "star_condition": ">0.5"
+          },
+          "limit_up_next": {
+            "weight": 1.0,
+            "star_condition": ">0.5"
+          },
+          "cum_drop_first_positive": {
+            "weight": 1.0,
+            "star_condition": ">0.5",
+            "lookback": 8,
+            "cum_drop_threshold": -5.0
+          },
+          "volume_breakout": {
+            "weight": 1.0,
+            "star_condition": ">0.5",
+            "lookback": 5,
+            "ratio": 2.0
+          },
+          "amplitude_positive": {
+            "weight": 1.0,
+            "star_condition": ">0.5",
+            "amp_threshold": 10.0
+          },
+          "rsi_oversold_bounce": {
+            "weight": 1.0,
+            "star_condition": ">0.5",
+            "period": 14,
+            "oversold": 30.0
+          }
+        }
+      },
+      "train": {
+        "cagr": 211.74,
+        "mdd": -18.14,
+        "calmar": 11.67,
+        "sharpe": 2.89,
+        "trades": 166,
+        "win_rate": 69.3,
+        "total_return": 2903.8,
+        "yearly": {
+          "2023": {
+            "return": 200.5,
+            "trades": 48,
+            "win_rate": 70.8
+          },
+          "2024": {
+            "return": 173.1,
+            "trades": 68,
+            "win_rate": 64.7
+          },
+          "2025": {
+            "return": 269.9,
+            "trades": 50,
+            "win_rate": 74.0
+          }
+        }
+      },
+      "full": {
+        "cagr": 284.04,
+        "mdd": -22.3,
+        "calmar": 12.74,
+        "sharpe": 3.28,
+        "trades": 367,
+        "win_rate": 71.1,
+        "total_return": 621375.7,
+        "yearly": {
+          "2020": {
+            "return": 309.0,
+            "trades": 48,
+            "win_rate": 75.0
+          },
+          "2021": {
+            "return": 263.6,
+            "trades": 64,
+            "win_rate": 70.3
+          },
+          "2022": {
+            "return": 450.7,
+            "trades": 55,
+            "win_rate": 72.7
+          },
+          "2023": {
+            "return": 200.1,
+            "trades": 51,
+            "win_rate": 70.6
+          },
+          "2024": {
+            "return": 173.2,
+            "trades": 68,
+            "win_rate": 64.7
+          },
+          "2025": {
+            "return": 270.3,
+            "trades": 50,
+            "win_rate": 74.0
+          },
+          "2026": {
+            "return": 141.6,
+            "trades": 31,
+            "win_rate": 74.2
+          }
+        }
+      }
+    }
+  ]
+}

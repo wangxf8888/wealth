@@ -1,0 +1,70 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AIWealth · 交易策略看板</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;600;700&family=Noto+Sans+SC:wght@300;400;500;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="dashboard.css">
+</head>
+<body>
+<div class="loading-overlay" id="loadingOverlay"><div class="loader">LOADING DASHBOARD ···</div></div>
+
+<!-- HEADER with Date Navigation -->
+<div class="header">
+  <h1>AIWEALTH <span>/ 交易策略看板</span></h1>
+  <div class="date-nav">
+    <button id="btnPrevDay" title="前一交易日">◀ 前一日</button>
+    <input type="date" id="dateInput">
+    <button id="btnNextDay" title="后一交易日">后一日 ▶</button>
+    <button id="btnLatest" title="最新交易日">最新</button>
+  </div>
+</div>
+
+<div class="container">
+  <!-- 顶部概览 KPI -->
+  <div class="kpi-strip" id="kpiStrip"></div>
+
+  <!-- 每日持仓面板 -->
+  <div class="section">
+    <div class="section-title">每日持仓 · POSITIONS <span id="posDate" style="color:var(--text-muted);font-weight:300;margin-left:12px"></span></div>
+    <div class="positions-grid" id="positionsGrid"></div>
+  </div>
+
+  <!-- 收益曲线 + 买卖信号 -->
+  <div class="row row-3-2">
+    <!-- 收益曲线图 -->
+    <div class="section">
+      <div class="section-title">收益曲线 · EQUITY CURVE</div>
+      <div class="chart-time-filter" id="timeFilter">
+        <span class="time-pill" data-range="1m">近1月</span>
+        <span class="time-pill" data-range="3m">近3月</span>
+        <span class="time-pill" data-range="6m">近半年</span>
+        <span class="time-pill active" data-range="all">全部</span>
+      </div>
+      <div class="chart-container" id="equityChart"></div>
+    </div>
+
+    <!-- 买卖信号 -->
+    <div class="section">
+      <div class="section-title">买卖信号 · SIGNALS</div>
+      <div class="signals-list" id="signalsList"></div>
+    </div>
+  </div>
+
+  <!-- 每日点评 -->
+  <div class="section">
+    <div class="section-title">每日点评 · DAILY COMMENTARY</div>
+    <div class="commentary-content" id="commentary"></div>
+  </div>
+
+  <div class="footer">AIWealth Trading Strategy Dashboard · 数据从 dashboard_data.json 加载</div>
+</div>
+
+<script src="echarts.min.js"></script>
+<!-- Pre-load data for file:// protocol compatibility -->
+<script src="dashboard_data.js"></script>
+<script src="dashboard.js"></script>
+</body>
+</html>
