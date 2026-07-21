@@ -1,12 +1,23 @@
-# 大文件与数据，禁止提交进git
-data/stocks.db
-data/**/*.db
-*.db
-
-# 缓存
+# Python
 __pycache__/
-*.pyc
+*.py[cod]
+*.so
 
-# 日志
-*.log
+# Data
+data/
+*.db
+*.pkl
+
+# Logs
 logs/
+*.log
+
+# OS/IDE
+.DS_Store
+.vscode/
+.idea/
+*.swp
+
+# Temp
+*.tmp
+*.bak

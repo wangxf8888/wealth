@@ -3,68 +3,249 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>AIWealth · 交易策略看板</title>
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;600;700&family=Noto+Sans+SC:wght@300;400;500;700&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="dashboard.css">
+<title>AIWealth · 回测策略Dashboard</title>
+<style>
+:root {
+  --bg: #0f1117;
+  --card-bg: #1a1d27;
+  --border: #2a2d3a;
+  --text: #e8e8e8;
+  --text-muted: #8a8f9e;
+  --green: #00c853;
+  --red: #ff1744;
+  --blue: #448aff;
+  --gold: #ffd740;
+  --purple: #b388ff;
+}
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans SC', sans-serif;
+  min-height: 100vh;
+  padding: 20px;
+}
+.header {
+  display: flex; align-items: center; justify-content: space-between;
+  margin-bottom: 24px; flex-wrap: wrap; gap: 12px;
+}
+.header h1 { font-size: 22px; font-weight: 700; }
+.header h1 span { color: var(--text-muted); font-weight: 300; font-size: 14px; }
+.tabs {
+  display: flex; gap: 8px;
+}
+.tab-btn {
+  padding: 8px 20px; border-radius: 6px; border: 1px solid var(--border);
+  background: transparent; color: var(--text-muted); cursor: pointer;
+  font-size: 13px; transition: all .2s;
+}
+.tab-btn.active { background: var(--blue); color: #fff; border-color: var(--blue); }
+.tab-btn:hover:not(.active) { border-color: var(--blue); color: var(--text); }
+
+/* KPI Cards */
+.kpi-grid {
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 12px; margin-bottom: 24px;
+}
+.kpi-card {
+  background: var(--card-bg); border: 1px solid var(--border);
+  border-radius: 10px; padding: 16px 20px;
+}
+.kpi-card .label { font-size: 12px; color: var(--text-muted); margin-bottom: 4px; }
+.kpi-card .value { font-size: 24px; font-weight: 700; }
+.kpi-card .value.green { color: var(--green); }
+.kpi-card .value.red { color: var(--red); }
+.kpi-card .value.blue { color: var(--blue); }
+.kpi-card .value.gold { color: var(--gold); }
+.kpi-card .sub { font-size: 11px; color: var(--text-muted); margin-top: 4px; }
+
+/* Charts */
+.charts-row {
+  display: grid; grid-template-columns: 1fr; gap: 16px; margin-bottom: 24px;
+}
+.chart-box {
+  background: var(--card-bg); border: 1px solid var(--border);
+  border-radius: 10px; padding: 16px;
+}
+.chart-box .title { font-size: 14px; font-weight: 600; margin-bottom: 12px; }
+.chart-container { width: 100%; height: 360px; }
+.chart-container-sm { width: 100%; height: 280px; }
+
+/* Annual Stats */
+.section-title {
+  font-size: 16px; font-weight: 600; margin-bottom: 12px;
+  padding-bottom: 8px; border-bottom: 1px solid var(--border);
+}
+.annual-grid {
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  gap: 10px; margin-bottom: 24px;
+}
+.annual-card {
+  background: var(--card-bg); border: 1px solid var(--border);
+  border-radius: 8px; padding: 12px 16px;
+}
+.annual-card .year { font-size: 16px; font-weight: 700; color: var(--blue); }
+.annual-card .stats { font-size: 12px; color: var(--text-muted); margin-top: 6px; line-height: 1.8; }
+.annual-card .stats strong { color: var(--text); }
+
+/* Table */
+.table-section {
+  background: var(--card-bg); border: 1px solid var(--border);
+  border-radius: 10px; padding: 16px; margin-bottom: 24px;
+}
+.table-controls {
+  display: flex; gap: 12px; margin-bottom: 12px; align-items: center; flex-wrap: wrap;
+}
+.search-input {
+  background: var(--bg); border: 1px solid var(--border); border-radius: 6px;
+  padding: 8px 12px; color: var(--text); font-size: 13px; width: 240px;
+}
+.search-input:focus { outline: none; border-color: var(--blue); }
+.filter-select {
+  background: var(--bg); border: 1px solid var(--border); border-radius: 6px;
+  padding: 8px 12px; color: var(--text); font-size: 13px;
+}
+.trade-count { font-size: 12px; color: var(--text-muted); margin-left: auto; }
+
+table {
+  width: 100%; border-collapse: collapse; font-size: 12px;
+}
+thead th {
+  padding: 10px 8px; text-align: left; border-bottom: 1px solid var(--border);
+  color: var(--text-muted); font-weight: 500; cursor: pointer; white-space: nowrap;
+  user-select: none;
+}
+thead th:hover { color: var(--text); }
+thead th.sorted::after { content: ' ▼'; font-size: 10px; }
+thead th.sorted.asc::after { content: ' ▲'; font-size: 10px; }
+tbody tr { border-bottom: 1px solid rgba(42,45,58,0.5); }
+tbody tr:hover { background: rgba(68,138,255,0.05); }
+tbody td { padding: 8px; white-space: nowrap; }
+.td-green { color: var(--green); }
+.td-red { color: var(--red); }
+
+.footer {
+  text-align: center; padding: 20px; color: var(--text-muted); font-size: 12px;
+}
+.loading {
+  display: flex; align-items: center; justify-content: center;
+  height: 200px; color: var(--text-muted); font-size: 14px;
+}
+.error-msg {
+  background: rgba(255,23,68,0.1); border: 1px solid var(--red);
+  border-radius: 8px; padding: 16px; margin: 20px 0; color: var(--red);
+  font-size: 13px; line-height: 1.6;
+}
+
+@media (max-width: 768px) {
+  body { padding: 12px; }
+  .kpi-grid { grid-template-columns: repeat(2, 1fr); }
+  .chart-container { height: 260px; }
+  .chart-container-sm { height: 220px; }
+  .search-input { width: 100%; }
+  table { font-size: 11px; }
+}
+</style>
 </head>
 <body>
-<div class="loading-overlay" id="loadingOverlay"><div class="loader">LOADING DASHBOARD ···</div></div>
 
-<!-- HEADER with Date Navigation -->
 <div class="header">
-  <h1>AIWEALTH <span>/ 交易策略看板</span></h1>
-  <div class="date-nav">
-    <button id="btnPrevDay" title="前一交易日">◀ 前一日</button>
-    <input type="date" id="dateInput">
-    <button id="btnNextDay" title="后一交易日">后一日 ▶</button>
-    <button id="btnLatest" title="最新交易日">最新</button>
+  <h1>AIWealth <span>/ 回测策略Dashboard</span></h1>
+  <div class="tabs">
+    <button class="tab-btn active" data-strategy="combined_5slot">5策略联合</button>
+    <button class="tab-btn" data-strategy="combined">3策略联合</button>
+    <button class="tab-btn" data-strategy="limitup_early_seal">早封涨停</button>
+    <button class="tab-btn" data-strategy="gem_star_late_seal">创科晚封</button>
+    <button class="tab-btn" data-strategy="amplitude_reversal">振幅反转</button>
   </div>
 </div>
 
-<div class="container">
-  <!-- 顶部概览 KPI -->
-  <div class="kpi-strip" id="kpiStrip"></div>
+<div id="app">
+  <div class="loading" id="loadingMsg">正在加载数据...</div>
+</div>
 
-  <!-- 每日持仓面板 -->
-  <div class="section">
-    <div class="section-title">每日持仓 · POSITIONS <span id="posDate" style="color:var(--text-muted);font-weight:300;margin-left:12px"></span></div>
-    <div class="positions-grid" id="positionsGrid"></div>
-  </div>
+<div id="mainContent" style="display:none;">
+  <!-- KPI -->
+  <div class="kpi-grid" id="kpiGrid"></div>
 
-  <!-- 收益曲线 + 买卖信号 -->
-  <div class="row row-3-2">
-    <!-- 收益曲线图 -->
-    <div class="section">
-      <div class="section-title">收益曲线 · EQUITY CURVE</div>
-      <div class="chart-time-filter" id="timeFilter">
-        <span class="time-pill" data-range="1m">近1月</span>
-        <span class="time-pill" data-range="3m">近3月</span>
-        <span class="time-pill" data-range="6m">近半年</span>
-        <span class="time-pill active" data-range="all">全部</span>
-      </div>
+  <!-- Equity Curve -->
+  <div class="charts-row">
+    <div class="chart-box">
+      <div class="title">📈 资金曲线 · Equity Curve</div>
       <div class="chart-container" id="equityChart"></div>
     </div>
+  </div>
 
-    <!-- 买卖信号 -->
-    <div class="section">
-      <div class="section-title">买卖信号 · SIGNALS</div>
-      <div class="signals-list" id="signalsList"></div>
+  <!-- Monthly Returns -->
+  <div class="charts-row">
+    <div class="chart-box">
+      <div class="title">📊 月度收益率 · Monthly Returns</div>
+      <div class="chart-container-sm" id="monthlyChart"></div>
     </div>
   </div>
 
-  <!-- 每日点评 -->
-  <div class="section">
-    <div class="section-title">每日点评 · DAILY COMMENTARY</div>
-    <div class="commentary-content" id="commentary"></div>
-  </div>
+  <!-- Annual Stats -->
+  <div class="section-title">📅 年度分组统计</div>
+  <div class="annual-grid" id="annualGrid"></div>
 
-  <div class="footer">AIWealth Trading Strategy Dashboard · 数据从 dashboard_data.json 加载</div>
+  <!-- Trade Table -->
+  <div class="table-section">
+    <div class="section-title">📋 交易明细</div>
+    <div class="table-controls">
+      <input type="text" class="search-input" id="searchInput" placeholder="搜索股票代码或名称...">
+      <select class="filter-select" id="filterResult">
+        <option value="all">全部</option>
+        <option value="win">盈利</option>
+        <option value="loss">亏损</option>
+      </select>
+      <select class="filter-select" id="filterStrategy">
+        <option value="all">全部策略</option>
+      </select>
+      <span class="trade-count" id="tradeCount"></span>
+    </div>
+    <div style="overflow-x:auto;">
+      <table id="tradeTable">
+        <thead>
+          <tr>
+            <th data-col="id">#</th>
+            <th data-col="code">代码</th>
+            <th data-col="name">名称</th>
+            <th data-col="strategy">策略</th>
+            <th data-col="buy_date">买入日</th>
+            <th data-col="buy_price">买入价</th>
+            <th data-col="sell_date">卖出日</th>
+            <th data-col="sell_price">卖出价</th>
+            <th data-col="sell_reason">卖出原因</th>
+            <th data-col="return_pct">收益%</th>
+            <th data-col="hold_hours">持仓时</th>
+            <th data-col="capital_after">资金</th>
+          </tr>
+        </thead>
+        <tbody id="tradeBody"></tbody>
+      </table>
+    </div>
+  </div>
 </div>
 
+<div class="footer">
+  AIWealth 回测策略Dashboard · 数据区间 2021-01 ~ 2026-07 · 5策略联合CAGR 229.61% · 纯前端展示
+</div>
+
+<script>
+  // Global error handler - show runtime errors visibly on page
+  window.onerror = function(msg, src, line, col, err) {
+    var el = document.getElementById('loadingMsg');
+    if (el) el.innerHTML = '<div class="error-msg"><strong>JS Runtime Error</strong><br>' +
+      msg + '<br>at ' + src + ':' + line + ':' + col + '</div>';
+    return false;
+  };
+  window.onunhandledrejection = function(e) {
+    var el = document.getElementById('loadingMsg');
+    if (el) el.innerHTML = '<div class="error-msg"><strong>Promise Error</strong><br>' +
+      (e.reason ? e.reason.message || e.reason : 'Unknown') + '</div>';
+  };
+</script>
 <script src="echarts.min.js"></script>
-<!-- Pre-load data for file:// protocol compatibility -->
-<script src="dashboard_data.js"></script>
 <script src="dashboard.js"></script>
 </body>
 </html>

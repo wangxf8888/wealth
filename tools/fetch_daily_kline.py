@@ -93,7 +93,11 @@ def get_trading_dates(start_date, end_date):
 
 
 def get_all_stocks(trading_dates):
-    """获取所有交易日的股票并集, 返回 {code: code_name}"""
+    """获取所有交易日的股票并集, 返回 {code: code_name}
+
+    BaoStock的query_all_stock在当天17:00可能返回空(数据未就绪),
+    fallback机制: 如果目标日期返回空，自动尝试前1-5个交易日
+    """
     stock_map = {}
     # 取首尾+中间日获取完整股票列表
     sample_dates = [trading_dates[0], trading_dates[-1]]
@@ -107,6 +111,23 @@ def get_all_stocks(trading_dates):
             code, trade_status, code_name = row[0], row[1], row[2]
             if trade_status == '1' and code.startswith(STOCK_PREFIXES):
                 stock_map[code] = code_name
+
+    # Fallback: 如果返回0只股票(BaoStock数据延迟), 尝试前几个交易日
+    if not stock_map:
+        logger.warning("当前日期股票列表为空, 尝试使用前几个交易日的列表...")
+        from datetime import datetime, timedelta
+        base_date = datetime.strptime(trading_dates[0], '%Y-%m-%d')
+        for offset in range(1, 6):
+            fallback_date = (base_date - timedelta(days=offset)).strftime('%Y-%m-%d')
+            rs = bs.query_all_stock(day=fallback_date)
+            while rs.error_code == '0' and rs.next():
+                row = rs.get_row_data()
+                code, trade_status, code_name = row[0], row[1], row[2]
+                if trade_status == '1' and code.startswith(STOCK_PREFIXES):
+                    stock_map[code] = code_name
+            if stock_map:
+                logger.info(f"使用 {fallback_date} 的股票列表({len(stock_map)}只)作为fallback")
+                break
     return stock_map
 
 
