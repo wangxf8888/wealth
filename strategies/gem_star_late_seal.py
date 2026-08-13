@@ -17,6 +17,7 @@
 import re
 from typing import Optional
 
+import trading_rules
 from strategies.base import Strategy, Signal, SellSignal
 
 
@@ -36,6 +37,23 @@ class GemStarLateSealStrategy(Strategy):
     def __init__(self):
         self._cand_codes = set()
         self._cand_date = None
+
+    @staticmethod
+    def _is_st(info) -> bool:
+        """ST双保险判定(Task#136): isST字段 ∨ 名称含ST(大写化) ∨ 名称含'退'。
+
+        背景: 历史回填数据isST漏标(2021-2025单日120~210只isST=0但名称带*ST),
+        对齐S2 amplitude_reversal._is_st写法并追加退市整理期'退'字过滤。
+        name来源: 回测链backtest/data_feed与实盘链realtime/data_feed的
+        snapshot均注入code_name(源自stock_kline.code_name, 按日历史名称,
+        填充率100%); 若上游异常缺name则退化为纯isST判定(不误杀)。
+        """
+        if info.get('isST'):
+            return True
+        name = str(info.get('code_name') or '')
+        if 'ST' in name.upper() or '退' in name:
+            return True
+        return False
 
     def get_candidates(self, date, data_feed):
         """筛选昨日20%晚封涨停的创业板/科创板股票。"""
@@ -68,9 +86,8 @@ class GemStarLateSealStrategy(Strategy):
             if not (_CYB_PATTERN.match(code) or _STAR_PATTERN.match(code)):
                 continue
 
-            # ST 过滤: 仅使用isST字段(与独立脚本一致)
-            # 注: CYB/STAR板ST股也是20%涨跌幅,不需要按名称排除
-            if info.get('isST'):
+            # ST 过滤: isST+名称双保险(Task#136修复isST漏标风险敞口)
+            if self._is_st(info):
                 continue
 
             # 前日数据
@@ -83,7 +100,9 @@ class GemStarLateSealStrategy(Strategy):
                 continue
 
             # 20%涨停判定(创业板/科创板) - 含0.01容差
-            limit_price = round(prev_preclose * 1.20, 2)
+            # [Task#299] 涨停价统一trading_rules.limit_prices(Decimal ROUND_HALF_UP
+            # 交易所口径); 创科×1.2对舍入bug数学免疫(t292实测0错), 纯防口径漂移
+            limit_price = trading_rules.limit_prices(code, prev_preclose)[0]
             if prev_close < limit_price - 0.01:
                 continue
 
@@ -105,17 +124,15 @@ class GemStarLateSealStrategy(Strategy):
             if h1_close >= limit_price - 0.01:
                 continue  # H1已封板, 不是晚封
 
-            # 今日open < 今日涨停价(能买到, 非一字开)
+            # 今日open < 今日涨停价(能买到, 非一字开); 今日open不能是跌停(买不到)
             today_open = info.get('open') or 0.0
             preclose = info.get('preclose') or 0.0
             if today_open <= 0 or preclose <= 0:
                 continue
-            today_limit = round(preclose * 1.20, 2)
+            today_limit, today_limit_down = trading_rules.limit_prices(
+                code, preclose)
             if today_open >= today_limit - 0.01:
                 continue
-
-            # 今日open不能是跌停(买不到)
-            today_limit_down = round(preclose * 0.80, 2)
             if today_open <= today_limit_down + 0.01:
                 continue
 
@@ -152,11 +169,11 @@ class GemStarLateSealStrategy(Strategy):
         )
 
     def should_sell(self, position, date, hour, data_feed):
-        """日级TP-priority卖出逻辑(使用daily high/low确保不遗漏竞价区间价格):
-        - Hour1: Gap检测(open超TP/SL以open成交)
-        - Hours1-4: TP检测(hourly high触发即卖)
-        - Hour4: 用daily high补检TP, daily low检SL + 到期
-        确保TP在SL之前有机会触发(日级TP优先)。
+        """挂单可执行语义(实盘=TP限价单+SL止损单全天挂单):
+        - 每小时: open已越过TP/SL → 以open成交(跳空/触发即成交)
+        - 每小时: hourly high触发TP以tp_target成交, hourly low触发SL以sl_target成交
+        - 同一小时TP/SL双触发: 保守取SL(小时内OHLC顺序未知, 不做乐观假设)
+        - 到期: hour4 close平仓
         """
         # T+1: 买入当日禁卖
         if position.buy_date == date:
@@ -173,39 +190,31 @@ class GemStarLateSealStrategy(Strategy):
         if not bar_open or bar_open <= 0:
             return None
 
-        # 1) Hour1 Gap检测: open已超过TP/SL阈值
-        if hour == 1:
-            open_pnl = (bar_open - buy_price) / buy_price
-            if open_pnl >= self.take_profit_pct:
-                return SellSignal(reason='take_profit', price=float(bar_open))
-            if open_pnl <= self.stop_loss_pct:
-                return SellSignal(reason='stop_loss', price=float(bar_open))
+        # 1) open已越过阈值 → 挂单以open成交(先判SL, 保守)
+        open_pnl = (bar_open - buy_price) / buy_price
+        if open_pnl <= self.stop_loss_pct:
+            return SellSignal(reason='stop_loss', price=float(bar_open))
+        if open_pnl >= self.take_profit_pct:
+            return SellSignal(reason='take_profit', price=float(bar_open))
 
-        # 2) 每小时检测TP(从hourly high): TP一旦触发立即卖出
+        # 2) 盘中hourly high/low触发(同小时双触发保守取SL)
         bar_high = data_feed.get_hour_high(position.code, date, hour)
-        if bar_high and bar_high > 0 and bar_high >= tp_target:
+        bar_low = data_feed.get_hour_low(position.code, date, hour)
+        sl_hit = bar_low and bar_low > 0 and bar_low <= sl_target
+        tp_hit = bar_high and bar_high > 0 and bar_high >= tp_target
+        if sl_hit:
+            return SellSignal(reason='stop_loss', price=float(sl_target))
+        if tp_hit:
             return SellSignal(reason='take_profit', price=float(tp_target))
 
-        # 3) Hour4: 用daily OHLC做最终TP/SL检测 + 到期
-        if hour == 4:
-            # daily high可能包含竞价区间的极值(hourly bars未覆盖)
-            day_high = data_feed.get_day_high(position.code, date)
-            if day_high and day_high > 0 and day_high >= tp_target:
-                return SellSignal(reason='take_profit', price=float(tp_target))
-
-            # SL: 用daily low检测(含竞价区间)
-            day_low = data_feed.get_day_low(position.code, date)
-            if day_low and day_low > 0 and day_low <= sl_target:
-                return SellSignal(reason='stop_loss', price=float(sl_target))
-
-            # 到期: hours_held >= max_hold_hours → close平仓
-            if position.hours_held >= self.max_hold_hours:
+        # 3) 到期: hours_held >= max_hold_hours 且 hour == 4 → close平仓
+        if hour == 4 and position.hours_held >= self.max_hold_hours:
+            close_price = data_feed.get_hour_close(position.code, date, 4)
+            if not close_price or close_price <= 0:
                 close_price = data_feed.get_day_close(position.code, date)
-                if not close_price or close_price <= 0:
-                    close_price = data_feed.get_hour_close(position.code, date, 4)
-                sell_price = (close_price if close_price and close_price > 0
-                              else bar_open)
-                return SellSignal(reason='expired', price=float(sell_price))
+            sell_price = (close_price if close_price and close_price > 0
+                          else bar_open)
+            return SellSignal(reason='expired', price=float(sell_price))
 
         return None
 

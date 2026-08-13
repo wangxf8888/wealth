@@ -29,6 +29,9 @@ from collections import defaultdict
 from dataclasses import dataclass, asdict
 from typing import Optional, List, Dict
 
+import trading_rules
+import tick_scheduler
+import execution_core
 from strategies.base import Strategy, Signal, SellSignal
 from backtest.data_feed import BacktestDataFeed
 
@@ -78,6 +81,7 @@ class UnifiedPortfolio:
         self.initial_capital = initial_capital
         self.cost_rate = cost_rate
         self.cash = initial_capital
+        self.buy_scale = 1.0  # Task#44: 当日买入系数(引擎每日设置, 默认1.0=零侵入)
         self.slots: Dict[int, Optional[Position]] = {i: None for i in range(n_slots)}
         self.trades: List[TradeRecord] = []
         self._cur_date = ''
@@ -128,7 +132,8 @@ class UnifiedPortfolio:
         if signal.code in self.held_codes():
             return False
 
-        target_amount = self.get_buy_amount(current_prices)
+        # Task#44: 买入金额 = NAV/n_slots × 当日仓位系数(默认1.0)
+        target_amount = self.get_buy_amount(current_prices) * self.buy_scale
         buy_amount = min(target_amount, self.cash)
         shares = int(buy_amount / (price * (1 + self.cost_rate)) / 100) * 100
         if shares <= 0:
@@ -213,9 +218,36 @@ class UnifiedBacktestEngine:
     def __init__(self, strategies: Dict[int, Strategy], data_feed: BacktestDataFeed,
                  initial_capital: float = 1_000_000,
                  market_filter: bool = False,
-                 market_filter_threshold: float = -1.0):
+                 market_filter_threshold: float = -1.0,
+                 index_filter: float = None,
+                 sell_day_no_buy: bool = True,
+                 minute_exit: bool = False,
+                 position_scaler=None,
+                 tick_interval: str = 'hour',
+                 dd_boost_x: float = None,
+                 dd_boost_w: float = None):
         self.strategies = strategies  # {slot_id: strategy_instance}
         self.data_feed = data_feed
+        self.sell_day_no_buy = sell_day_no_buy
+        # Task#44: 逐日仓位系数(冰点减仓overlay), None=关闭零侵入
+        self.position_scaler = position_scaler
+        # Task#204: drawdown-boost回撤加仓(用户2026-08-06批准生产化)。
+        # None=关闭零侵入(研究注入路径不变); 语义=t174 DrawdownBoostScaler:
+        # 组合日级盯市净值(hour4_close口径=daily_nav)自峰值回撤dd>X%进入加仓态
+        # (新开仓=NAV/n_slots×w), 回前高(dd<=0)退出; 冰点日ice优先boost不生效
+        self.dd_boost_x = dd_boost_x
+        self.dd_boost_w = dd_boost_w
+        self._dd_seen = 0              # 已消化的daily_nav条目数
+        self._dd_peak = None           # 截至昨日的日级盯市峰值
+        self._dd_prev_nav = None
+        self._dd_boost_on = False
+        self._dd_boost_days = 0        # 实际加仓生效天数
+        self._dd_wanted_days = 0       # 加仓态天数(含被ice抑制)
+        self._dd_suppressed_days = 0   # 冰点日抑制天数
+        # Task#45 统一调度: tick驱动粒度(默认'hour'=现行hour循环, 行为零变化;
+        # '5min'预留给含decision_interval='5min'策略的组合, hour级策略
+        # 经tick_scheduler.strategy_due只在hour首bar被调用)
+        self.tick_interval = tick_scheduler.validate_interval(tick_interval)
         n_slots = len(strategies)
         self.portfolio = UnifiedPortfolio(n_slots, initial_capital)
         self.nav_history = []  # [(date, hour, nav)]
@@ -225,6 +257,76 @@ class UnifiedBacktestEngine:
         self.market_filter = market_filter
         self.market_filter_threshold = market_filter_threshold
         self._market_filter_skip_days = 0
+        self._market_filter_half_days = 0  # 缩减50%的天数
+        # Task#64: 实盘同款指数熔断(前日上证close_rate<阈值→当日不开新仓),
+        # 语义=realtime.morning_decision.check_market_filter, None=关闭零侵入
+        self.index_filter = index_filter
+        self._index_filter_skip_days = 0
+        self._t0_sell_blocked = 0          # 框架拦截的T+0卖出信号数(策略bug指示)
+        self._price_clamped = 0            # 框架钳制的越界成交价数(策略bug指示)
+        self._exdiv_buy_blocked = 0        # 框架拦截的除权除息日买入数(Task#4)
+        # Task#24: 卖出触线分钟级精化(默认关闭=零侵入, 走现行hour级路径)
+        # 2026-07-31批准: 策略可类级声明minute_exit=True(现仅大阳低吸),
+        # 全局--minute-exit未开时声明slot自动走分钟路径, 其余slot零影响
+        self.minute_exit = minute_exit
+        self._minute_checker = None
+        self._minute_ok_slots = set()
+        if minute_exit or any(getattr(st, 'minute_exit', False)
+                              for st in strategies.values()):
+            from backtest.minute_exit import MinuteExitChecker
+            self._minute_checker = MinuteExitChecker(data_feed)
+            for sid, st in strategies.items():
+                if not (minute_exit or getattr(st, 'minute_exit', False)):
+                    continue
+                if MinuteExitChecker.supports(st):
+                    self._minute_ok_slots.add(sid)
+                    print(f"[minute-exit] Slot{sid} {st.name}: 卖出走分钟级路径"
+                          + ("(策略声明)" if not minute_exit else ""))
+                else:
+                    print(f"[minute-exit] Slot{sid} {st.name}: 参数不完整, 走hour级路径")
+        # Task#54: 5min级策略bar级链路(decision_interval='5min'的slot集合)。
+        # hour模式组合此集合恒为空 → 主循环bar分发段整段不执行(铁律零侵入)。
+        self._bar_slots = [sid for sid, st in strategies.items()
+                           if st.decision_interval == '5min']
+        if self._bar_slots:
+            if self.tick_interval != '5min':
+                raise ValueError(
+                    f"策略{[strategies[s].name for s in self._bar_slots]}声明"
+                    f"decision_interval='5min', 必须 --tick-interval 5min 驱动"
+                    f"(hour驱动会静默降级为hour边界分发, Task#53缺口①拒绝复现)")
+            for sid in self._bar_slots:
+                st = strategies[sid]
+                if type(st).should_buy_bar is Strategy.should_buy_bar:
+                    raise ValueError(
+                        f"Slot{sid} {st.name}: decision_interval='5min'但未实现"
+                        f"should_buy_bar(bar级决策入口, 见strategies/base.py)")
+                print(f"[bar-level] Slot{sid} {st.name}: 买入走bar级链路"
+                      f"(should_buy_bar每tick分发, 成交=当tick bar开盘价"
+                      f"钳制bar区间; 当日候选经bar_day_prescreen预筛)")
+
+    def _exec_price(self, code: str, date: str, hour: int, price: float) -> float:
+        """框架级成交价校验: 钳制到该小时真实成交区间[low, high]。"""
+        low = self.data_feed.get_hour_low(code, date, hour)
+        high = self.data_feed.get_hour_high(code, date, hour)
+        clamped = trading_rules.clamp_price_to_bar(price, low, high)
+        if clamped != price:
+            self._price_clamped += 1
+        return clamped
+
+    def _exec_price_bar(self, code: str, date: str, tick, price: float) -> float:
+        """bar级成交价校验(Task#54缺口③): 钳制到该5min bar真实区间[low,high]。
+
+        5min级策略的成交价不再被hour区间钳制(可执行性以当tick bar为准,
+        与hour级钳制同哲学)。该bar分钟数据缺失时降级hour级区间钳制。
+        """
+        bar = self.data_feed.get_bar_at(code, date, tick.time_end)
+        if bar is None:
+            return self._exec_price(code, date, tick.hour, price)
+        clamped = trading_rules.clamp_price_to_bar(
+            price, float(bar[3] or 0), float(bar[2] or 0))
+        if clamped != price:
+            self._price_clamped += 1
+        return clamped
 
     def run(self, start_date: str, end_date: str) -> dict:
         self._start_date = start_date
@@ -235,6 +337,41 @@ class UnifiedBacktestEngine:
         print(f"[Unified] 策略数: {len(self.strategies)}, 初始资金: {self.portfolio.initial_capital:,.0f}")
 
         for date in trading_dates:
+            # Task#44: 开盘前设置当日买入系数(D-1涨停家数决定, 关闭态恒1.0)
+            if self.position_scaler is not None:
+                self.portfolio.buy_scale = self.position_scaler.get(date)
+            elif self.dd_boost_x is not None:
+                self.portfolio.buy_scale = 1.0   # boost单独启用时逐日复位
+
+            # Task#204: drawdown-boost状态机(开盘前, daily_nav恰含<=D-1条目
+            # =在线单遍无未来数据); 逐行对齐research/t174_boost_engine_runner
+            # .DrawdownBoostScaler.get(冰点日ice优先, 豁免日仍属冰点日)
+            if self.dd_boost_x is not None:
+                navs = list(self.daily_nav.values())
+                for v in navs[self._dd_seen:]:
+                    self._dd_prev_nav = v
+                    if self._dd_peak is None or v > self._dd_peak:
+                        self._dd_peak = v
+                self._dd_seen = len(navs)
+                if self._dd_prev_nav is not None:
+                    dd = ((self._dd_peak - self._dd_prev_nav)
+                          / self._dd_peak * 100
+                          if self._dd_peak and self._dd_peak > 0 else 0.0)
+                    if self._dd_boost_on and dd <= 0:
+                        self._dd_boost_on = False
+                    if not self._dd_boost_on and dd > self.dd_boost_x:
+                        self._dd_boost_on = True
+                if self._dd_boost_on:
+                    self._dd_wanted_days += 1
+                    is_ice = (self.position_scaler is not None and
+                              getattr(self.position_scaler, 'is_ice_day',
+                                      lambda d: False)(date))
+                    if is_ice:
+                        self._dd_suppressed_days += 1
+                    elif self.portfolio.buy_scale >= 1.0:
+                        self.portfolio.buy_scale = self.dd_boost_w
+                        self._dd_boost_days += 1
+
             # 开盘前：每个策略独立筛选候选股
             candidates_map = {}  # {slot_id: [codes]}
             for slot_id, strategy in self.strategies.items():
@@ -244,15 +381,59 @@ class UnifiedBacktestEngine:
                     cands = []
                 candidates_map[slot_id] = cands or []
 
-            # 大盘过滤
-            market_down_today = False
-            if self.market_filter:
-                market_down_today = self.data_feed.is_market_down(
-                    date, self.market_filter_threshold)
-                if market_down_today:
-                    self._market_filter_skip_days += 1
+            # Task#54性能通道: 5min级策略当日候选预筛(bar_day_prescreen为
+            # 信号必要条件的纯剪枝, 只有当日事件候选才进48-tick bar循环)
+            bar_candidates_map = {}
+            for slot_id in self._bar_slots:
+                st = self.strategies[slot_id]
+                bar_candidates_map[slot_id] = [
+                    c for c in candidates_map.get(slot_id, [])
+                    if st.bar_day_prescreen(c, date, self.data_feed)]
 
-            for hour in (1, 2, 3, 4):
+            # 大盘风控过滤（T-1涨跌比+成交额MA20）
+            buy_ratio = 1.0
+            health_reason = "no_filter"
+            if self.market_filter:
+                buy_ratio, health_reason = self.data_feed.get_market_health(date)
+                if buy_ratio == 0.0:
+                    self._market_filter_skip_days += 1
+                elif buy_ratio == 0.5:
+                    self._market_filter_half_days += 1
+
+            # Task#64: 实盘同款指数熔断——前日上证跌破阈值当日不开新仓
+            # (卖出不受影响, 复用buy_ratio=0.0的既有买入gate)
+            if self.index_filter is not None and \
+                    self.data_feed.is_market_down(date, self.index_filter):
+                if buy_ratio != 0.0:
+                    buy_ratio = 0.0
+                    health_reason = f"index_down(prev<{self.index_filter}%)"
+                self._index_filter_skip_days += 1
+
+            # 缩减50%时，最多允许买入的slot数（向下取整一半）
+            max_buy_today = self.portfolio.n_slots
+            if buy_ratio == 0.5:
+                max_buy_today = max(1, self.portfolio.n_slots // 2)
+            bought_today = 0
+
+            # Task#45 统一调度: tick分发驱动。'hour'模式=4个hour边界tick,
+            # 每tick同时是hour首(决策)与hour尾(记账), 执行序列与历史
+            # `for hour in (1,2,3,4)`逐语句等价(回归证明见STATUS)。
+            # '5min'模式=48个bar tick, hour级策略经strategy_due只在
+            # hour首bar决策, 5min级策略(未来)每tick决策。
+            for tick in tick_scheduler.day_ticks(self.tick_interval):
+                hour = tick.hour
+                # Task#54: 5min级策略bar级分发(每tick买卖决策, 缺口①修复)。
+                # hour模式_bar_slots恒空 → 本段不执行(hour级路径零改动)。
+                if self._bar_slots:
+                    bought_today += self._process_bar_tick(
+                        date, tick, bar_candidates_map, buy_ratio,
+                        max_buy_today, bought_today)
+                if not tick.is_hour_start:
+                    # 非hour边界tick: hour级策略无决策点(5min级已在上方
+                    # _process_bar_tick分发), 仅hour尾bar做记账。
+                    if tick.is_hour_end:
+                        self.portfolio.tick_hour()
+                    continue
                 self.portfolio.set_context(date, hour)
 
                 # 1. 更新持仓市值 -> 计算NAV
@@ -262,33 +443,61 @@ class UnifiedBacktestEngine:
 
                 # 2. 卖出检查（遍历所有occupied slots）
                 for slot_id, strategy in self.strategies.items():
+                    if slot_id in self._bar_slots:
+                        continue  # Task#54: bar级slot买卖在_process_bar_tick
+                    if not tick_scheduler.strategy_due(
+                            strategy.decision_interval, tick):
+                        continue
                     pos = self.portfolio.get_position(slot_id)
                     if pos is None:
                         continue
-                    sell_signal = strategy.should_sell(pos, date, hour, self.data_feed)
+                    if slot_id in self._minute_ok_slots:
+                        # Task#24: 分钟级触线判定(缺数据时checker内fallback hour级)
+                        sell_signal = self._minute_checker.check(
+                            pos, strategy, date, hour)
+                    else:
+                        sell_signal = strategy.should_sell(pos, date, hour, self.data_feed)
                     if sell_signal:
-                        # T+1硬性校验
+                        # 框架T+1兜底: 买入当日卖出信号 → 拦截(模拟券商拒单)
                         if not (pos.buy_date < date):
-                            raise RuntimeError(
-                                f"T+0违规！{pos.code} buy={pos.buy_date} "
-                                f"sell={date} - 违反A股T+1交易规则")
+                            self._t0_sell_blocked += 1
+                            print(f"[框架拦截] T+0卖出: {pos.code} "
+                                  f"buy={pos.buy_date} sell={date} "
+                                  f"(策略={pos.strategy_name})")
+                            continue
+                        # 框架涨跌停兜底: 该hour封死跌停 → 卖单无法成交，顺延
+                        if self.data_feed.is_sell_blocked_limit_down(
+                                pos.code, date, hour):
+                            continue
                         sell_price = sell_signal.price
                         if not sell_price or sell_price <= 0:
                             sell_price = self.data_feed.get_hour_open(
                                 pos.code, date, hour)
+                        # 框架成交价兜底: 钳制到该小时真实成交区间
+                        sell_price = self._exec_price(
+                            pos.code, date, hour, sell_price)
                         if sell_price and sell_price > 0:
                             self.portfolio.sell(slot_id, sell_price, sell_signal.reason)
 
-                # 3. 买入检查（仅处理空slot + 非大盘过滤日）
-                if market_down_today:
-                    self.portfolio.tick_hour()
+                # 3. 买入检查（仅处理空slot + 风控过滤）
+                if buy_ratio == 0.0:
+                    if tick.is_hour_end:
+                        self.portfolio.tick_hour()
                     continue
 
                 for slot_id, strategy in self.strategies.items():
+                    if slot_id in self._bar_slots:
+                        continue  # Task#54: bar级slot买卖在_process_bar_tick
+                    if not tick_scheduler.strategy_due(
+                            strategy.decision_interval, tick):
+                        continue
                     if not self.portfolio.is_slot_empty(slot_id):
                         continue
+                    # 缩减50%模式：今日已买入达上限则跳过
+                    if bought_today >= max_buy_today:
+                        break
                     # sell_day_no_buy: 卖出当天不买入
-                    if getattr(strategy, 'sell_day_no_buy', False):
+                    if self.sell_day_no_buy and getattr(strategy, 'sell_day_no_buy', False):
                         if self.portfolio.sold_today(slot_id):
                             continue
 
@@ -302,6 +511,25 @@ class UnifiedBacktestEngine:
                         # IPO过滤
                         if self.data_feed.is_ipo_period(code, date):
                             continue
+                        # 入场守卫(Task#45统一): 除权除息拦截+涨停拦截走
+                        # execution_core.evaluate_open_entry —— 与实盘
+                        # morning_decision同一份入场评估函数(Task#4语义、
+                        # 判定顺序、数学口径均不变, 回归证明逐分不差)
+                        _, entry_reject = execution_core.evaluate_open_entry(
+                            code=code, strategy=strategy.name,
+                            slot_id=str(slot_id), date=date,
+                            open_price=self.data_feed.get_hour_open(
+                                code, date, hour),
+                            exchange_preclose=self.data_feed.get_day_preclose(
+                                code, date),
+                            prev_close=self.data_feed.get_prev_day(
+                                code, date).get('close'),
+                            is_st=self.data_feed.is_st_day(code, date))
+                        if entry_reject == 'ex_dividend':
+                            self._exdiv_buy_blocked += 1
+                            continue
+                        if entry_reject == 'limit_up_open':
+                            continue
                         signal = strategy.should_buy(
                             code, date, hour, self.data_feed, self.portfolio)
                         if signal:
@@ -313,14 +541,19 @@ class UnifiedBacktestEngine:
                             else:
                                 buy_price = self.data_feed.get_hour_open(
                                     code, date, hour)
+                            # 框架成交价兜底: 钳制到该小时真实成交区间
+                            buy_price = self._exec_price(
+                                code, date, hour, buy_price)
                             if buy_price and buy_price > 0:
                                 success = self.portfolio.buy_slot(
                                     slot_id, signal, buy_price, cur_prices)
                                 if success:
+                                    bought_today += 1
                                     break  # 该slot已占用，下一个策略
 
-                # 4. 小时结束
-                self.portfolio.tick_hour()
+                # 4. 小时结束(5min模式下仅hour尾bar记账, 计时口径与hour模式一致)
+                if tick.is_hour_end:
+                    self.portfolio.tick_hour()
 
             # 日末记录daily nav
             day_end_prices = self._day_end_prices(date)
@@ -329,10 +562,131 @@ class UnifiedBacktestEngine:
 
         elapsed = time.time() - t0
         if self.market_filter:
-            print(f"[Unified] 回测耗时: {elapsed:.1f}秒 | 大盘过滤跳过: {self._market_filter_skip_days}天")
+            print(f"[Unified] 回测耗时: {elapsed:.1f}秒 | 风控跳过: {self._market_filter_skip_days}天, 缩减50%: {self._market_filter_half_days}天")
         else:
             print(f"[Unified] 回测耗时: {elapsed:.1f}秒")
+        if self.index_filter is not None:
+            print(f"[Unified] 指数熔断(前日上证<{self.index_filter}%): "
+                  f"跳过开仓 {self._index_filter_skip_days}天")
+        # Task#204: drawdown-boost生效统计
+        if self.dd_boost_x is not None:
+            print(f"[dd-boost] X={self.dd_boost_x}% w={self.dd_boost_w}: "
+                  f"加仓生效{self._dd_boost_days}天 / 加仓态"
+                  f"{self._dd_wanted_days}天 (冰点抑制"
+                  f"{self._dd_suppressed_days}天)")
+        # 框架兜底触发统计: 非0说明策略存在合规bug, 必须排查
+        if self._t0_sell_blocked or self._price_clamped:
+            print(f"[框架兜底告警] T+0卖出拦截: {self._t0_sell_blocked}次 | "
+                  f"越界成交价钳制: {self._price_clamped}次 → 请排查策略逻辑")
+        # 除权除息日买入拦截统计(Task#4, 非bug — 假"低开"信号被框架过滤属预期)
+        if self._exdiv_buy_blocked:
+            print(f"[框架守卫] 除权除息日买入拦截: {self._exdiv_buy_blocked}次"
+                  f"(按hour尝试计数, 该日open_rate语义失真)")
+        # Task#24: 分钟数据命中/缺口统计(防静默偏差)
+        if self._minute_checker is not None:
+            print(f"[minute-exit] {self.data_feed.minute_coverage_report()}")
         return self.get_summary()
+
+    def _process_bar_tick(self, date: str, tick, bar_candidates_map: dict,
+                          buy_ratio: float, max_buy_today: int,
+                          bought_today: int) -> int:
+        """Task#54: 5min级策略的bar级买卖分发(每tick调用一次, 返回新增买入数)。
+
+        语义(与strategies/base.py should_buy_bar约定一致):
+        - tick=bar N开始时点; 策略可见bar 1..N-1完整+bar N开盘
+          (data_feed.get_bars_until数据层裁剪, 未来数据封死);
+        - 买入成交价=bar N开盘(信号bar的次一bar开盘, A2式保守语义;
+          策略可经Signal.price覆盖), 钳制到bar N真实区间(_exec_price_bar),
+          不再被hour区间钳制(缺口③修复);
+        - 守卫顺序为先信号后守卫: evaluate_open_entry(除权/涨停开盘拒单)与
+          策略信号相互独立, 结果与hour路径的先守卫后信号等价; bar循环中
+          每tick全候选先过守卫代价过高(性能通道);
+        - 卖出每tick检查(策略自定bar级退出语义), T+1/跌停顺延兜底与
+          hour级同款; minute_exit精化通道不适用bar级slot(策略自判)。
+        """
+        self.portfolio.set_context(date, tick.hour)
+        n_bought = 0
+        # 1. 卖出检查
+        for slot_id in self._bar_slots:
+            strategy = self.strategies[slot_id]
+            pos = self.portfolio.get_position(slot_id)
+            if pos is None:
+                continue
+            sell_signal = strategy.should_sell(
+                pos, date, tick.hour, self.data_feed)
+            if not sell_signal:
+                continue
+            # 框架T+1兜底: 买入当日卖出信号 → 拦截(模拟券商拒单)
+            if not (pos.buy_date < date):
+                self._t0_sell_blocked += 1
+                print(f"[框架拦截] T+0卖出: {pos.code} "
+                      f"buy={pos.buy_date} sell={date} "
+                      f"(策略={pos.strategy_name})")
+                continue
+            # 框架跌停兜底: 该hour封死跌停 → 卖单无法成交，顺延
+            if self.data_feed.is_sell_blocked_limit_down(
+                    pos.code, date, tick.hour):
+                continue
+            sell_price = sell_signal.price
+            if not sell_price or sell_price <= 0:
+                _, sell_price = self.data_feed.get_bars_until(
+                    pos.code, date, tick.time_end)
+            sell_price = self._exec_price_bar(
+                pos.code, date, tick, sell_price)
+            if sell_price and sell_price > 0:
+                self.portfolio.sell(slot_id, sell_price, sell_signal.reason)
+        # 2. 买入检查(风控0.0全禁买与hour路径一致)
+        if buy_ratio == 0.0:
+            return 0
+        for slot_id in self._bar_slots:
+            strategy = self.strategies[slot_id]
+            if not self.portfolio.is_slot_empty(slot_id):
+                continue
+            if bought_today + n_bought >= max_buy_today:
+                break
+            if self.sell_day_no_buy and getattr(strategy, 'sell_day_no_buy',
+                                                False):
+                if self.portfolio.sold_today(slot_id):
+                    continue
+            for code in bar_candidates_map.get(slot_id, []):
+                if code in self.portfolio.held_codes():
+                    continue
+                if self.data_feed.is_ipo_period(code, date):
+                    continue
+                signal = strategy.should_buy_bar(
+                    code, date, tick, self.data_feed, self.portfolio)
+                if not signal:
+                    continue
+                _, bar_open = self.data_feed.get_bars_until(
+                    code, date, tick.time_end)
+                if not bar_open or bar_open <= 0:
+                    continue
+                # 入场守卫(Task#45统一): 与hour级/实盘同一份评估函数,
+                # open=bar N开盘价(涨停开盘拒单即bar级A2保守语义)
+                _, entry_reject = execution_core.evaluate_open_entry(
+                    code=code, strategy=strategy.name,
+                    slot_id=str(slot_id), date=date,
+                    open_price=bar_open,
+                    exchange_preclose=self.data_feed.get_day_preclose(
+                        code, date),
+                    prev_close=self.data_feed.get_prev_day(
+                        code, date).get('close'),
+                    is_st=self.data_feed.is_st_day(code, date))
+                if entry_reject == 'ex_dividend':
+                    self._exdiv_buy_blocked += 1
+                    continue
+                if entry_reject == 'limit_up_open':
+                    continue
+                buy_price = signal.price if (signal.price and
+                                             signal.price > 0) else bar_open
+                buy_price = self._exec_price_bar(code, date, tick, buy_price)
+                if buy_price and buy_price > 0:
+                    cur_prices = self._current_prices(date, tick.hour)
+                    if self.portfolio.buy_slot(slot_id, signal, buy_price,
+                                               cur_prices):
+                        n_bought += 1
+                        break  # 该slot已占用，下一个策略
+        return n_bought
 
     def _current_prices(self, date: str, hour: int) -> dict:
         """用当前hour的open更新持仓价格。"""
@@ -504,13 +858,57 @@ def load_strategy(name: str) -> Strategy:
 def run_unified_backtest(strategy_names: list, start_date: str, end_date: str,
                          initial_capital: float = 1_000_000,
                          market_filter: bool = False,
-                         market_filter_threshold: float = -1.0) -> dict:
+                         market_filter_threshold: float = -1.0,
+                         index_filter: float = None,
+                         sell_day_no_buy: bool = True,
+                         minute_exit: bool = False,
+                         position_scale: str = None,
+                         tick_interval: str = 'hour',
+                         exit_confirm: str = None,
+                         dd_boost: str = None,
+                         promo_gate: str = None) -> dict:
     """统一资金池回测 - 便捷API。
+
+    Args:
+        dd_boost: Task#204 drawdown-boost规格 '<X>:<w>'(如 '15:1.5'),
+            默认None=关闭(API向后兼容, 生产CLI默认开启见main)
+        promo_gate: Task#319 晋级率过热门控规格 'p<分位>:<系数>'(生产实配
+            'p70:0.3'), 默认None=关闭(API向后兼容, 生产CLI默认开启见main);
+            优先级 ice > gate > boost(见backtest/promo_gate.py规格冻结链)
 
     Returns:
         dict: {summary, daily_nav, trades}
     """
     data_feed = BacktestDataFeed(DB_PATH)
+
+    # Task#44: 逐日仓位系数(冰点减仓overlay), 默认None=关闭零侵入
+    position_scaler = None
+    if position_scale:
+        from backtest.position_scale import PositionScaler
+        position_scaler = PositionScaler(DB_PATH, position_scale,
+                                         start_date, end_date)
+
+    # Task#319: 晋级率过热门控overlay(用户2026-08-12批准方案C, 承#250/#311
+    # 冻结规格): 包裹ice scaler成 ice > gate 优先级链, gate > boost由引擎
+    # native分支成立(下方仅buy_scale>=1.0才覆盖为w)
+    if promo_gate:
+        from backtest.promo_gate import PromoGateScaler
+        position_scaler = PromoGateScaler(DB_PATH, promo_gate,
+                                          inner=position_scaler)
+
+    # Task#204: drawdown-boost规格解析 '<X>:<w>' → (dd_boost_x, dd_boost_w)
+    dd_boost_x = dd_boost_w = None
+    if dd_boost:
+        try:
+            xs, ws = dd_boost.split(':')
+            dd_boost_x, dd_boost_w = float(xs), float(ws)
+        except ValueError:
+            raise ValueError(f"--dd-boost 格式错误: {dd_boost!r} "
+                             f"(期望 '<X>:<w>', 如 '15:1.5')")
+        if dd_boost_x <= 0 or dd_boost_w <= 1.0 or dd_boost_w > 1.5:
+            raise ValueError(f"--dd-boost 参数越界: {dd_boost!r} "
+                             f"(要求 X>0, 1.0<w<=1.5 — 杠杆红线w<=1.5保证"
+                             f"单仓<=NAV/5×1.5, cash恒>=0无融资)")
 
     # 每个策略分配一个固定slot
     strategies = {}
@@ -518,11 +916,41 @@ def run_unified_backtest(strategy_names: list, start_date: str, end_date: str,
         strategies[i] = load_strategy(name)
         print(f"  Slot {i}: {name} ({strategies[i].name})")
 
+    # Task#48: G2收盘确认注入(格式 N@HHMM, 如 2@1000; 仅实验用, 正式启用
+    # 应写入策略类属性confirm_bars/confirm_before)。仅trailing策略注入
+    # (ExitEngine对非trailing的confirm参数fail-fast); 仅--minute-exit生效。
+    if exit_confirm:
+        if not minute_exit:
+            raise ValueError("--exit-confirm 仅在 --minute-exit 下有意义"
+                             "(hour级路径无5min确认语义), fail-fast拒绝")
+        cb, _, cbf = exit_confirm.partition('@')
+        cb = int(cb)
+        if cb <= 0 or not cbf:
+            raise ValueError(f"--exit-confirm 格式须为 N@HHMM(N>0), "
+                             f"got {exit_confirm!r}")
+        for i, st in strategies.items():
+            if getattr(st, 'sell_mode', None) == 'trailing':
+                st.confirm_bars = cb
+                st.confirm_before = cbf
+                st.confirm_scope = 'trailing'
+                print(f"  [exit-confirm] Slot{i} {st.name}: G2确认注入 "
+                      f"confirm_bars={cb} before={cbf} scope=trailing")
+            else:
+                print(f"  [exit-confirm] Slot{i} {st.name}: 非trailing, "
+                      f"不注入(维持立即语义)")
+
     engine = UnifiedBacktestEngine(
         strategies, data_feed,
         initial_capital=initial_capital,
         market_filter=market_filter,
         market_filter_threshold=market_filter_threshold,
+        index_filter=index_filter,
+        sell_day_no_buy=sell_day_no_buy,
+        minute_exit=minute_exit,
+        position_scaler=position_scaler,
+        tick_interval=tick_interval,
+        dd_boost_x=dd_boost_x,
+        dd_boost_w=dd_boost_w,
     )
 
     summary = engine.run(start_date, end_date)
@@ -550,9 +978,71 @@ def main():
                         default=False, help='启用大盘过滤')
     parser.add_argument('--market-filter-threshold', type=float, default=-1.0,
                         help='大盘过滤阈值(%%)')
+    parser.add_argument('--index-filter', dest='index_filter', type=float,
+                        default=None,
+                        help='Task#64: 实盘同款指数熔断阈值(%%), 如 -1.0 = '
+                             '前日上证close_rate<-1.0%%则当日不开新仓(卖出不受'
+                             '影响), 语义=realtime.morning_decision内置规则; '
+                             '默认关闭=零侵入')
     parser.add_argument('--output', type=str, default=None,
                         help='输出JSON文件路径(默认自动生成)')
+    parser.add_argument('--output-prefix', dest='output_prefix', type=str,
+                        default=None,
+                        help='solo档案模式(Task#33): 输出重定向到 '
+                             'logs/backtest/solo/<prefix>_{trades.json,detail.txt}, '
+                             '不覆盖 unified_5slot_* 生产产物')
+    parser.add_argument('--sell-first', dest='sell_first', action='store_true',
+                        default=False, help='允许卖出当天同Slot立即买入')
+    parser.add_argument('--no-frontend', dest='no_frontend', action='store_true',
+                        default=False,
+                        help='实验模式: 不覆盖前端生产数据文件(combined_5slot_new_trades.json等)')
+    parser.add_argument('--minute-exit', dest='minute_exit', action='store_true',
+                        default=False,
+                        help='Task#24: 卖出触线分钟级精化(minute.db 5min bar + '
+                             'execution_core.ExitEngine); 默认关闭走hour级路径')
+    parser.add_argument('--position-scale', dest='position_scale', type=str,
+                        default='ice35:0.3:repair_exempt',
+                        help='Task#44: 逐日仓位系数overlay, 格式 ice<阈值>:<系数>'
+                             '[:repair_exempt] (如 ice35:0.3 = D-1非ST涨停家数<35'
+                             '时新开仓仅30%%); Task#204起默认开启生产实配 '
+                             'ice35:0.3:repair_exempt, 传 off/none 关闭(solo纯'
+                             '策略口径必须显式关闭)')
+    parser.add_argument('--tick-interval', dest='tick_interval', type=str,
+                        default='hour', choices=list(tick_scheduler.VALID_INTERVALS),
+                        help='Task#45: 调度tick粒度。hour(默认)=现行hour循环'
+                             '行为零变化; 5min=48bar/日tick驱动(仅当组合含'
+                             "decision_interval='5min'策略时有意义, hour级策略"
+                             '仍只在hour边界决策)')
+    parser.add_argument('--exit-confirm', dest='exit_confirm', type=str,
+                        default=None,
+                        help='Task#48: G2收盘确认注入, 格式 N@HHMM (如 2@1000='
+                             '早盘≤10:00 trailing触线需连续2根5min bar收盘确认'
+                             '→次bar开盘卖); 须配合--minute-exit; 硬SL与窗口外'
+                             '维持立即语义; 默认关闭=零侵入')
+    parser.add_argument('--dd-boost', dest='dd_boost', type=str,
+                        default='15:1.5',
+                        help='Task#204: drawdown-boost回撤加仓, 格式 <X>:<w> '
+                             '(默认 15:1.5 = 组合日级盯市自峰值回撤>15%%时新开仓'
+                             '=NAV/5×1.5, 回前高退出, 冰点日ice优先); 用户2026-'
+                             '08-06批准默认开启, 传 off/none 关闭(solo纯策略口'
+                             '径必须显式关闭)')
+    parser.add_argument('--promo-gate', dest='promo_gate', type=str,
+                        default='p70:0.3',
+                        help='Task#319: 晋级率过热门控overlay, 格式 p<分位>:<系数>'
+                             ' (默认 p70:0.3 = promo_rate∩tail_mean_h4双双expanding'
+                             ' P70触发的D+1过热日新开仓×0.3, 优先级ice>gate>boost);'
+                             ' 用户2026-08-12批准方案C默认开启, 传 off/none 关闭'
+                             '(solo纯策略口径必须显式关闭); 规格冻结见'
+                             ' backtest/promo_gate.py, 禁止参数再优化')
     args = parser.parse_args()
+
+    # Task#204: 生产默认开启的overlay支持显式关闭(off/none, 大小写不敏)
+    if args.position_scale and args.position_scale.lower() in ('off', 'none'):
+        args.position_scale = None
+    if args.dd_boost and args.dd_boost.lower() in ('off', 'none'):
+        args.dd_boost = None
+    if args.promo_gate and args.promo_gate.lower() in ('off', 'none'):
+        args.promo_gate = None
 
     strategy_names = [s.strip() for s in args.strategies.split(',')]
     n = len(strategy_names)
@@ -563,6 +1053,23 @@ def main():
     print(f"策略: {', '.join(strategy_names)}")
     if args.market_filter:
         print(f"大盘过滤: 开启 (阈值={args.market_filter_threshold}%)")
+    if args.index_filter is not None:
+        print(f"指数熔断: 开启 (前日上证<{args.index_filter}%不开新仓, 实盘同款)")
+    if args.sell_first:
+        print(f"模式: 先卖后买（卖出当天可立即买入）")
+    if args.minute_exit:
+        print(f"模式: 卖出触线分钟级精化 (--minute-exit)")
+    if args.exit_confirm:
+        print(f"模式: G2收盘确认 (--exit-confirm {args.exit_confirm})")
+    if args.position_scale:
+        print(f"模式: 冰点减仓overlay (--position-scale {args.position_scale})")
+    if args.dd_boost:
+        print(f"模式: 回撤加仓drawdown-boost (--dd-boost {args.dd_boost})")
+    if args.promo_gate:
+        print(f"模式: 晋级率过热门控overlay (--promo-gate {args.promo_gate}, "
+              f"ice>gate>boost)")
+    if args.tick_interval != 'hour':
+        print(f"模式: 统一调度tick驱动 (--tick-interval {args.tick_interval})")
     print(f"=" * 60 + "\n")
 
     result = run_unified_backtest(
@@ -570,12 +1077,19 @@ def main():
         initial_capital=args.capital,
         market_filter=args.market_filter,
         market_filter_threshold=args.market_filter_threshold,
+        index_filter=args.index_filter,
+        sell_day_no_buy=not args.sell_first,
+        minute_exit=args.minute_exit,
+        position_scale=args.position_scale,
+        tick_interval=args.tick_interval,
+        exit_confirm=args.exit_confirm,
+        dd_boost=args.dd_boost,
+        promo_gate=args.promo_gate,
     )
 
     # ===== 输出文件 =====
     # 1. daily_nav JSON (供前端使用)
     os.makedirs(FRONTEND_DIR, exist_ok=True)
-    nav_json_path = os.path.join(FRONTEND_DIR, 'unified_5slot_nav.json')
     nav_payload = {
         'mode': 'unified_pool',
         'initial_capital': args.capital,
@@ -585,26 +1099,36 @@ def main():
         'daily_nav': result['daily_nav'],
         'trades': [asdict(t) for t in result['trades']],
     }
-    with open(nav_json_path, 'w', encoding='utf-8') as f:
-        json.dump(nav_payload, f, ensure_ascii=False, indent=2)
-    print(f"\n[输出] daily_nav JSON: {nav_json_path}")
+    if args.no_frontend:
+        print("\n[实验模式] 跳过前端生产数据文件写入(--no-frontend)")
+    else:
+        nav_json_path = os.path.join(FRONTEND_DIR, 'unified_5slot_nav.json')
+        with open(nav_json_path, 'w', encoding='utf-8') as f:
+            json.dump(nav_payload, f, ensure_ascii=False, indent=2)
+        print(f"\n[输出] daily_nav JSON: {nav_json_path}")
 
-    # 2. 兼容旧格式: combined_5slot_new_trades.json (供server.py /api/nav_history使用)
-    compat_path = os.path.join(FRONTEND_DIR, 'combined_5slot_new_trades.json')
-    compat_payload = {
-        'mode': 'unified_pool',
-        'combined_summary': result['summary'],
-        'strategies': strategy_names,
-        'daily_nav': result['daily_nav'],
-        'trades': [asdict(t) for t in result['trades']],
-    }
-    with open(compat_path, 'w', encoding='utf-8') as f:
-        json.dump(compat_payload, f, ensure_ascii=False, indent=2)
-    print(f"[输出] 兼容JSON: {compat_path}")
+        # 2. 兼容旧格式: combined_5slot_new_trades.json (供server.py /api/nav_history使用)
+        compat_path = os.path.join(FRONTEND_DIR, 'combined_5slot_new_trades.json')
+        compat_payload = {
+            'mode': 'unified_pool',
+            'combined_summary': result['summary'],
+            'strategies': strategy_names,
+            'daily_nav': result['daily_nav'],
+            'trades': [asdict(t) for t in result['trades']],
+        }
+        with open(compat_path, 'w', encoding='utf-8') as f:
+            json.dump(compat_payload, f, ensure_ascii=False, indent=2)
+        print(f"[输出] 兼容JSON: {compat_path}")
 
-    # 3. 交易明细日志
-    os.makedirs(LOG_DIR, exist_ok=True)
-    log_path = os.path.join(LOG_DIR, 'unified_5slot_trades.json')
+    # 3. 交易明细日志 (Task#33: --output-prefix → solo/ 目录, 防止solo明细互相覆盖)
+    if args.output_prefix:
+        out_dir = os.path.join(LOG_DIR, 'solo')
+        out_base = args.output_prefix
+    else:
+        out_dir = LOG_DIR
+        out_base = 'unified_5slot'
+    os.makedirs(out_dir, exist_ok=True)
+    log_path = os.path.join(out_dir, f'{out_base}_trades.json')
     with open(log_path, 'w', encoding='utf-8') as f:
         json.dump(nav_payload, f, ensure_ascii=False, indent=2)
     print(f"[输出] 完整日志: {log_path}")
@@ -613,8 +1137,8 @@ def main():
     try:
         from backtest.txt_formatter import TxtFormatter
         fmt = TxtFormatter(DB_PATH)
-        txt_path = fmt.generate('unified_5slot', result['summary'],
-                                result['trades'], LOG_DIR)
+        txt_path = fmt.generate(out_base, result['summary'],
+                                result['trades'], out_dir)
         fmt.close()
         print(f"[输出] TXT明细: {txt_path}")
     except Exception as e:

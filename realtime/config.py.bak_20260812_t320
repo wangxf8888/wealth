@@ -1,0 +1,185 @@
+"""实盘策略配置 - 修改此文件即可增减策略，无需改框架代码。
+
+设计原则:
+- 框架是策略无关的
+- 新增策略 = 在此文件ACTIVE_STRATEGIES中加一项 + 在strategies/目录放策略文件
+- 所有策略类必须继承 strategies.base.Strategy 并实现标准接口
+"""
+
+# =============================================================================
+# 策略中文正名（显示层统一, 用户指令2026-07-30: 汇报/看板/报告一律中文主导,
+# 技术代号仅限代码内部与档案文件）
+# =============================================================================
+STRATEGY_DISPLAY_NAMES = {
+    'firstboard_low_open_dip_v2': '首板低吸',
+    'amplitude_reversal': '巨振反转',
+    'gem_star_late_seal': '创科晚封',
+    'big_yang_low_open_v2': '大阳低吸',
+    'two_board_pullback_dip_h1c': '双板回调低吸',
+    # 已退役策略（仅历史数据展示用）
+    'limitup_early_seal': '涨停早封(已退役)',
+    'gem_star_limitup_low_open': '创科涨停低开(已退役)',
+}
+
+
+def strategy_display_name(name):
+    """技术名→中文正名; 未收录返回原名(防御)"""
+    return STRATEGY_DISPLAY_NAMES.get(name, name)
+
+
+# =============================================================================
+# 活跃策略列表（从strategies/目录动态import）
+# =============================================================================
+ACTIVE_STRATEGIES = [
+    # [Task#68 2026-07-29切换, 2026-07-30生效] S1: limitup_early_seal(+56.73%)
+    # → FB-A v2 firstboard_low_open_dip_v2(solo +102.80%/MDD 36.44%全registry最低,
+    # 用户已批准, QA放行 QA_AUDIT_FBA_V2_REPORT.md)。
+    # 回滚=恢复下面注释的旧条目并注释掉新条目:
+    # {
+    #     'module': 'strategies.limitup_early_seal',
+    #     'class': 'LimitupEarlySealStrategy',
+    #     'slot_id': 'S1',
+    #     'capital_ratio': 0.20,
+    #     'enabled': True,
+    #     'description': '涨停早封低开买入 | TP=+8% SL=-15% MaxHold=D+2',
+    # },
+    {
+        'module': 'strategies.firstboard_low_open_dip_v2',
+        'class': 'FirstboardLowOpenDipV2Strategy',
+        'slot_id': 'S1',
+        'capital_ratio': 0.20,
+        'enabled': True,
+        'display_name': '首板低吸',
+        'description': '首板低吸·首板次日低开低吸v2 | TP=+7% SL=-8% 监控D2..D6',
+    },
+    {
+        'module': 'strategies.amplitude_reversal',
+        'class': 'AmplitudeReversalStrategy',
+        'slot_id': 'S2',
+        'capital_ratio': 0.20,
+        'enabled': True,
+        'display_name': '巨振反转',
+        'description': '巨振反转·大上影冲高回落次日低开反弹 | TP=+5% SL=-15% MaxHold=D+2',
+    },
+    # [用户指令2026-08-03 16:12] 创科晚封恢复启用, 转观察模式
+    {
+        'module': 'strategies.gem_star_late_seal',
+        'class': 'GemStarLateSealStrategy',
+        'slot_id': 'S3',
+        'capital_ratio': 0.20,
+        'enabled': True,
+        'display_name': '创科晚封',
+        'description': '创科晚封·创业板/科创板晚封涨停次日 | TP=+12% SL=-20% MaxHold=D+2',
+    },
+    {
+        'module': 'strategies.big_yang_low_open_v2',
+        'class': 'BigYangLowOpenV2Strategy',
+        'slot_id': 'S4',
+        'capital_ratio': 0.20,
+        'enabled': True,
+        'display_name': '大阳低吸',
+        'description': '大阳低吸·大阳线次日低开反弹 | 参见策略文件',
+    },
+    # [Task#36 2026-07-25切换, 2026-07-27生效] S5: gem_star_limitup_low_open(无alpha,
+    # +0.17%/笔)→ B2-A two_board_pullback_dip_h1c(方案1, 用户已批准发布)。
+    # 回滚=恢复下面注释的旧条目并注释掉新条目:
+    # {
+    #     'module': 'strategies.gem_star_limitup_low_open',
+    #     'class': 'GemStarLimitupLowOpenStrategy',
+    #     'slot_id': 'S5',
+    #     'capital_ratio': 0.20,
+    #     'enabled': True,
+    #     'description': '创/科涨停次日低开 | 参见策略文件',
+    # },
+    {
+        'module': 'strategies.two_board_pullback_dip_h1c',
+        'class': 'TwoBoardPullbackDipH1cStrategy',
+        'slot_id': 'S5',
+        'capital_ratio': 0.20,
+        'enabled': True,
+        'display_name': '双板回调低吸',
+        'description': '双板回调低吸·次日10:30定时卖出 | 参见策略文件',
+    },
+]
+
+# =============================================================================
+# 策略冻结名单 (Task#285, 用户批准A案 2026-08-11, 依据t283 DECISION_PACK §2)
+# =============================================================================
+# 冻结语义: 不新开仓, 保留候选生成与假想跟踪(shadow_ledger S3假想池);
+# 存量持仓出场链零改动(正常走完TP/SL/到期); 其slot由V-C机制自然给
+# 其余策略动态竞争(allocate_idle_slots只处理有recommendations的通道)。
+# 复活判据: 假想池滚动3月月化回正且笔均>+0.5% → 提交G3+用户批准。
+# 回滚 = 清空列表一行(与DRAWDOWN_BOOST_ENABLED等既有开关同风格)
+STRATEGY_FROZEN = ['gem_star_late_seal']   # [Task#283/#285] 冻结名单: 不新开仓, 保留生成与假想跟踪
+
+# =============================================================================
+# 全局配置
+# =============================================================================
+TOTAL_CAPITAL = 1000000          # 总资金(元)
+MAX_SLOT_PER_STRATEGY = 1       # 每策略最多同时持仓数
+DATA_DB = '/home/AIWealth/data/stocks.db'
+OUTPUT_DIR = '/home/AIWealth/data/realtime'
+LOG_DIR = '/home/AIWealth/logs/realtime'
+
+# 动态再平衡模式说明:
+# - 回测引擎 (backtest/portfolio.py): buy_amount = get_nav() / n_slots  ✅ 已实现
+# - 实盘 (realtime/position_tracker.py): buy_amount = total_nav / 5    ✅ 已实现
+# - 两者逻辑完全一致: 每次买入时计算当前总净值/5，不是让每个slot独立运行
+# - 举例: 初始100万, S1赚100%后总资金120万, 下次每slot买入24万(=120/5)
+
+# 大盘过滤 - [Task#68 2026-07-29移除, 用户已批准] Task#64数据裁决:
+# "前日上证跌>1%不开新仓"熔断6年成本-41.6pp年化且Calmar恶化(4.20→3.55),
+# 替换为下方冰点减仓overlay。回滚=恢复 morning_decision.py 熔断分支
+# (注释保留)并置 POSITION_SCALE_ENABLED=False。阈值保留供回滚:
+MARKET_FILTER_THRESHOLD = -1.0   # (%)
+
+# 冰点减仓overlay - [Task#68 2026-07-29启用] 昨日非ST涨停家数<ICE →
+# 当日新开仓买入金额×W(与回测 backtest/position_scale.py PositionScaler
+# 同口径, Task#44引擎验证 ICE35/w0.3: Calmar 4.20→4.90/MDD -7.3pp)
+POSITION_SCALE_ENABLED = True
+POSITION_SCALE_ICE = 35          # 冰点阈值(昨日非ST涨停家数)
+POSITION_SCALE_W = 0.3           # 触发时买入金额系数
+
+# 候选股排序后取top-N展示
+CANDIDATE_TOP_N = 20
+
+# =============================================================================
+# V-C匿名动态槽位制 (用户裁决2026-07-31, 落地RUNBOOK: RUNBOOK_VC_20260731.md)
+# =============================================================================
+# ①5槽与策略解绑: 槽=纯资金位(P1..P5), 空槽不标策略
+# ②谁有信号谁占空闲槽(复用买入=占真实空闲槽, 槽上标策略名)
+# ③无空闲槽时杜绝先买后卖(复用信号当日放弃, skipped_no_idle_slot留痕)
+# False=现行"策略通道即槽位"路径(零行为变化); 收盘后用户发令翻True
+VC_DYNAMIC_SLOTS = True
+
+# permissive开盘价比例 (P0-2根因一修复, P0_DIAGNOSIS_20260731 §1.2):
+# 0.80×preclose恰=创科跌停价, 撞死S3"非跌停开"/S4"open>昨low"下界过滤
+# → 晚间候选S3连续9信号日零候选。修复=改0.995(温和低开):
+# open_rate仍传-20喂低开类条件(S2/S4上界), open价格过下界类条件,
+# 价格/涨幅解耦见data_feed._signal_snapshot. 0.80=现状, 发令后改0.995
+PERMISSIVE_OPEN_RATIO = 0.995
+
+# =============================================================================
+# 回撤加仓 drawdown-boost (Task#205 2026-08-06用户批准, t174 ENGINE_REPORT §8)
+# =============================================================================
+# 盘后盯市NAV回撤>=X% → boost_active=true, 次日非冰点日新开仓金额×W
+# (NAV/5×1.5=0.3×NAV, 天然等于单仓cap); NAV回到峰值(dd<=0)退出。
+# 冰点日(D-1非ST涨停家数<ICE)ice系数0.3优先, boost让位。
+# 状态持久化 data/drawdown_state.json (position_tracker盘后滚动更新;
+# 注意与Task#73回撤作战手册的 data/realtime/drawdown_state.json 是两个文件)。
+# 铁律: 状态缺失/损坏/任何异常 = boost不生效按原逻辑运行(安全降级)。
+# 回滚 = DRAWDOWN_BOOST_ENABLED=False 一行
+DRAWDOWN_BOOST_ENABLED = True
+DRAWDOWN_BOOST_X = 15.0          # 进入阈值: 回撤>=X%
+DRAWDOWN_BOOST_W = 1.5           # 触发时新开仓金额放大系数
+DRAWDOWN_BOOST_STATE_FILE = '/home/AIWealth/data/drawdown_state.json'
+
+# =============================================================================
+# 修复日豁免 (2026-07-31批准, RESEARCH_REPAIR_GATE.md §4)
+# =============================================================================
+# 冰点日若同时是"修复日"(昨日弱势池今晨9:25浅高开[2,3)达REPAIR_GATE=50只,
+# 口径常量单一来源 backtest/position_scale.py, 回测/实盘同源)
+# → 当日买入系数豁免恢复1.0满仓。失败(行情异常/覆盖率不足)安全降级为不豁免。
+# 置信度警示: 仅15豁免日/20笔研究样本, 低统计置信度(随decision json留痕)。
+# 回滚 = REPAIR_EXEMPT_ENABLED=False 一行
+REPAIR_EXEMPT_ENABLED = True

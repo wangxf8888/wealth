@@ -1,0 +1,343 @@
+{
+ "meta": {
+  "strategy": "早盘冲板追击(early_surge_chase_0940) 影子探测",
+  "date": "2026-08-06",
+  "prev_date": "2026-08-05",
+  "mode": "live",
+  "started_at": "2026-08-06 09:25:01",
+  "finished_at": "2026-08-06 09:50:00",
+  "whitelist": 2218,
+  "watched": 73,
+  "rounds_or_replay_codes": 120,
+  "rate_limit": {
+   "poll_interval_s": 10.0,
+   "min_req_gap_s": 1.0,
+   "max_req_per_round": 4
+  },
+  "skip_counts": {
+   "yizi": 5,
+   "chain_missing": 1,
+   "window_out": 3
+  },
+  "reconstructed": "2026-08-06 Task#199回放误覆盖事故后, 从detector_20260806.log如实重建; 台账所需字段(code/name/buy_px/confirm_bar/vol_ratio/vol_baseline/winner/rocket/meta.mode/date/skip_counts)完整, confirm_px/buy_ts/rank等日志未含字段缺省"
+ },
+ "signals": [
+  {
+   "code": "sh.600156",
+   "name": "华升股份",
+   "confirm_bar": "0935",
+   "confirm_ts": "09:31:20",
+   "buy_bar": "0940",
+   "buy_px": 8.84,
+   "vol_ratio": null,
+   "vol_baseline": "skipped",
+   "rocket": true,
+   "winner": true
+  },
+  {
+   "code": "sh.603823",
+   "name": "百合花",
+   "confirm_bar": "0935",
+   "confirm_ts": "09:30:30",
+   "buy_bar": "0940",
+   "buy_px": 65.84,
+   "vol_ratio": null,
+   "vol_baseline": "skipped",
+   "rocket": false,
+   "winner": false
+  },
+  {
+   "code": "sh.600611",
+   "name": "大众交通",
+   "confirm_bar": "0935",
+   "confirm_ts": "09:32:50",
+   "buy_bar": "0940",
+   "buy_px": 5.05,
+   "vol_ratio": null,
+   "vol_baseline": "skipped",
+   "rocket": false,
+   "winner": false
+  },
+  {
+   "code": "sh.601101",
+   "name": "昊华能源",
+   "confirm_bar": "0935",
+   "confirm_ts": "09:31:00",
+   "buy_bar": "0940",
+   "buy_px": 12.16,
+   "vol_ratio": null,
+   "vol_baseline": "skipped",
+   "rocket": false,
+   "winner": false
+  },
+  {
+   "code": "sh.603556",
+   "name": "海兴电力",
+   "confirm_bar": "0935",
+   "confirm_ts": "09:31:20",
+   "buy_bar": "0940",
+   "buy_px": 27.47,
+   "vol_ratio": null,
+   "vol_baseline": "skipped",
+   "rocket": false,
+   "winner": false
+  },
+  {
+   "code": "sh.600489",
+   "name": "中金黄金",
+   "confirm_bar": "0935",
+   "confirm_ts": "09:31:50",
+   "buy_bar": "0940",
+   "buy_px": 25.35,
+   "vol_ratio": null,
+   "vol_baseline": "skipped",
+   "rocket": false,
+   "winner": false
+  },
+  {
+   "code": "sh.603900",
+   "name": "莱绅通灵",
+   "confirm_bar": "0935",
+   "confirm_ts": "09:32:20",
+   "buy_bar": "0940",
+   "buy_px": 6.17,
+   "vol_ratio": null,
+   "vol_baseline": "skipped",
+   "rocket": false,
+   "winner": false
+  },
+  {
+   "code": "sh.603201",
+   "name": "常润股份",
+   "confirm_bar": "0935",
+   "confirm_ts": "09:30:40",
+   "buy_bar": "0940",
+   "buy_px": 18.2,
+   "vol_ratio": null,
+   "vol_baseline": "skipped",
+   "rocket": false,
+   "winner": false
+  },
+  {
+   "code": "sz.000692",
+   "name": "惠天热电",
+   "confirm_bar": "0935",
+   "confirm_ts": "09:30:12",
+   "buy_bar": "0940",
+   "buy_px": 4.24,
+   "vol_ratio": null,
+   "vol_baseline": "skipped",
+   "rocket": true,
+   "winner": false
+  },
+  {
+   "code": "sz.002355",
+   "name": "兴民智通",
+   "confirm_bar": "0935",
+   "confirm_ts": "09:30:03",
+   "buy_bar": "0940",
+   "buy_px": 5.43,
+   "vol_ratio": null,
+   "vol_baseline": "skipped",
+   "rocket": true,
+   "winner": false
+  },
+  {
+   "code": "sz.002963",
+   "name": "豪尔赛",
+   "confirm_bar": "0935",
+   "confirm_ts": "09:30:03",
+   "buy_bar": "0940",
+   "buy_px": 19.25,
+   "vol_ratio": null,
+   "vol_baseline": "skipped",
+   "rocket": false,
+   "winner": false
+  },
+  {
+   "code": "sz.000720",
+   "name": "新能泰山",
+   "confirm_bar": "0935",
+   "confirm_ts": "09:34:03",
+   "buy_bar": "0940",
+   "buy_px": 3.84,
+   "vol_ratio": null,
+   "vol_baseline": "skipped",
+   "rocket": false,
+   "winner": false
+  },
+  {
+   "code": "sz.001210",
+   "name": "金房能源",
+   "confirm_bar": "0935",
+   "confirm_ts": "09:30:12",
+   "buy_bar": "0940",
+   "buy_px": 22.25,
+   "vol_ratio": null,
+   "vol_baseline": "skipped",
+   "rocket": false,
+   "winner": false
+  },
+  {
+   "code": "sz.002975",
+   "name": "博杰股份",
+   "confirm_bar": "0935",
+   "confirm_ts": "09:31:03",
+   "buy_bar": "0940",
+   "buy_px": 90.01,
+   "vol_ratio": null,
+   "vol_baseline": "skipped",
+   "rocket": false,
+   "winner": false
+  },
+  {
+   "code": "sz.001282",
+   "name": "三联锻造",
+   "confirm_bar": "0935",
+   "confirm_ts": "09:31:33",
+   "buy_bar": "0940",
+   "buy_px": 17.94,
+   "vol_ratio": null,
+   "vol_baseline": "skipped",
+   "rocket": false,
+   "winner": false
+  },
+  {
+   "code": "sh.603602",
+   "name": "纵横通信",
+   "confirm_bar": "0940",
+   "confirm_ts": "09:39:00",
+   "buy_bar": "0945",
+   "buy_px": 12.16,
+   "vol_ratio": null,
+   "vol_baseline": "skipped",
+   "rocket": true,
+   "winner": true
+  },
+  {
+   "code": "sh.600449",
+   "name": "宁夏建材",
+   "confirm_bar": "0940",
+   "confirm_ts": "09:38:40",
+   "buy_bar": "0945",
+   "buy_px": 14.98,
+   "vol_ratio": null,
+   "vol_baseline": "skipped",
+   "rocket": false,
+   "winner": false
+  },
+  {
+   "code": "sh.600262",
+   "name": "北方股份",
+   "confirm_bar": "0940",
+   "confirm_ts": "09:37:20",
+   "buy_bar": "0945",
+   "buy_px": 15.29,
+   "vol_ratio": null,
+   "vol_baseline": "skipped",
+   "rocket": false,
+   "winner": false
+  },
+  {
+   "code": "sh.603048",
+   "name": "浙江黎明",
+   "confirm_bar": "0940",
+   "confirm_ts": "09:36:30",
+   "buy_bar": "0945",
+   "buy_px": 21.42,
+   "vol_ratio": null,
+   "vol_baseline": "skipped",
+   "rocket": false,
+   "winner": false
+  },
+  {
+   "code": "sh.600571",
+   "name": "信雅达",
+   "confirm_bar": "0940",
+   "confirm_ts": "09:39:00",
+   "buy_bar": "0945",
+   "buy_px": 11.39,
+   "vol_ratio": null,
+   "vol_baseline": "skipped",
+   "rocket": false,
+   "winner": false
+  },
+  {
+   "code": "sh.603657",
+   "name": "春光科技",
+   "confirm_bar": "0940",
+   "confirm_ts": "09:36:50",
+   "buy_bar": "0945",
+   "buy_px": 27.38,
+   "vol_ratio": null,
+   "vol_baseline": "skipped",
+   "rocket": false,
+   "winner": false
+  },
+  {
+   "code": "sz.003040",
+   "name": "楚天龙",
+   "confirm_bar": "0940",
+   "confirm_ts": "09:37:03",
+   "buy_bar": "0945",
+   "buy_px": 12.46,
+   "vol_ratio": null,
+   "vol_baseline": "skipped",
+   "rocket": true,
+   "winner": false
+  },
+  {
+   "code": "sz.002194",
+   "name": "武汉凡谷",
+   "confirm_bar": "0940",
+   "confirm_ts": "09:38:03",
+   "buy_bar": "0945",
+   "buy_px": 9.74,
+   "vol_ratio": null,
+   "vol_baseline": "skipped",
+   "rocket": false,
+   "winner": false
+  },
+  {
+   "code": "sz.002660",
+   "name": "茂硕电源",
+   "confirm_bar": "0940",
+   "confirm_ts": "09:39:33",
+   "buy_bar": "0945",
+   "buy_px": 7.11,
+   "vol_ratio": null,
+   "vol_baseline": "skipped",
+   "rocket": false,
+   "winner": false
+  },
+  {
+   "code": "sh.603991",
+   "name": "领先股份",
+   "confirm_bar": "0945",
+   "confirm_ts": "09:44:30",
+   "buy_bar": "0950",
+   "buy_px": 130.9,
+   "vol_ratio": null,
+   "vol_baseline": "skipped",
+   "rocket": false,
+   "winner": true
+  },
+  {
+   "code": "sh.603666",
+   "name": "亿嘉和",
+   "confirm_bar": "0945",
+   "confirm_ts": "09:41:30",
+   "buy_bar": "0950",
+   "buy_px": 25.98,
+   "vol_ratio": null,
+   "vol_baseline": "skipped",
+   "rocket": false,
+   "winner": false
+  }
+ ],
+ "skips": [
+  {
+   "note": "skips明细在事故中丢失, 计数见meta.skip_counts(日志重建)"
+  }
+ ]
+}

@@ -13,6 +13,25 @@ from typing import List, Dict, Optional
 DB_PATH = '/home/AIWealth/data/stocks.db'
 LOG_DIR = '/home/AIWealth/logs/backtest'
 
+# 策略中文简述映射(Task#32): 组合明细逐笔标注归属策略, 用户无需查代码即可分辨。
+# 新策略缺映射时降级只显示英文名。
+STRATEGY_LABELS = {
+    'limitup_early_seal': '涨停早封',
+    'amplitude_reversal': '振幅反转',
+    'gem_star_late_seal': '创科晚封',
+    'big_yang_low_open_v2': '大阳低开',
+    'two_board_pullback_dip_h1c': '双板回调低吸',
+}
+
+
+def _strategy_tag(trade) -> str:
+    """`[英文名·中文简述] ` 标注; 无 strategy_name 时返回空串(兼容旧调用方)。"""
+    sname = getattr(trade, 'strategy_name', '') or ''
+    if not sname:
+        return ''
+    zh = STRATEGY_LABELS.get(sname)
+    return f'[{sname}·{zh}] ' if zh else f'[{sname}] '
+
 
 def _safe_float(v) -> float:
     if v is None:
@@ -157,7 +176,8 @@ class TxtFormatter:
         date_range = self._get_date_range(signal_date, sell_date,
                                           before=10, after=10)
         if not date_range:
-            return [f"--- #{idx:03d} {code} {name} --- [数据缺失]", ""]
+            return [f"--- #{idx:03d} {code} {name} "
+                    f"{_strategy_tag(trade)}--- [数据缺失]", ""]
 
         # 批量查询该股在日期范围内的hourly数据
         day_data = self._query_stock_days(code, date_range)
@@ -171,8 +191,8 @@ class TxtFormatter:
         pnl_str = f"{trade.profit_pct:+.2f}%"
 
         lines = []
-        lines.append(f"--- {code} {name} ({header_params}) --- "
-                     f"[盈亏: {pnl_str}]")
+        lines.append(f"--- {code} {name} {_strategy_tag(trade)}"
+                     f"({header_params}) --- [盈亏: {pnl_str}]")
 
         # 表头
         lines.append(

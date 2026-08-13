@@ -150,3 +150,4 @@
 ## 文件清单
 - 策略代码：`strategies/gem_star_limitup_low_open.py`
 - 回测明细(TXT)：`logs/backtest/gem_star_limitup_low_open_detail.txt`
+- **solo档案(可执行口径+干净数据, Task#33, 降级留证)**：`logs/backtest/solo/gem_star_limitup_low_open_{trades.json,detail.txt}`（+10.89%/458笔确认无alpha, 总表见 `data/realtime/solo_strategy_registry.md`）

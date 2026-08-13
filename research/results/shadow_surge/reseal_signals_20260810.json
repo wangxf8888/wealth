@@ -1,0 +1,72 @@
+{
+ "meta": {
+  "strategy": "回封首板(seal_reseal_v1, Task#232)",
+  "date": "2026-08-10",
+  "mode": "live",
+  "started_at": "2026-08-10 17:01:13",
+  "rule": "V1: T3(1005-1130)首封∩开板重封>=1∩首板∩收盘封死∩非ST/bj/上市<90d; D+1开盘买 TP5/SL-8/H3",
+  "c08_rule": "C08升级格=V1∩单次回封(reopen_count==1), 并行记账口径切片(Task#240, t236矩阵终审首选升级格)",
+  "replay_baseline": "31日回放(2026-06-26~08-07): slot=1月化+32.6%/胜率75%; 笔级n=89 净+1.08%/胜率68.5%",
+  "coverage": {
+   "first_ts": "09:29:30",
+   "last_ts": "15:00:21",
+   "n_final": 2672,
+   "n_codes": 1610
+  },
+  "prev_date": "2026-08-07",
+  "n_sealed_eod": 112,
+  "status": "ok",
+  "drop_counts": {
+   "not_sealed_eod": 1498,
+   "st": 14,
+   "first_seal_out_of_T3": 60,
+   "not_firstboard": 13,
+   "no_reopen": 22
+  },
+  "finished_at": "2026-08-10 17:01:14"
+ },
+ "signals": [
+  {
+   "code": "sh.603130",
+   "name": "云中马",
+   "first_seal_bar": "1005",
+   "first_seal_ts": "10:03:59",
+   "reopen_cnt": 1,
+   "reopen_count": 1,
+   "c08_eligible": true,
+   "open_cnt_rt": 1,
+   "reseal_ts": "11:15:02",
+   "turn": 2.52,
+   "plan": "D+1开盘买(开盘涨停不买) TP+5%/SL-8%(D+2起日级,TP优先,跳空按开盘) D+3收盘兜底",
+   "notify": true
+  },
+  {
+   "code": "sz.002647",
+   "name": "仁东控股",
+   "first_seal_bar": "1025",
+   "first_seal_ts": "10:20:06",
+   "reopen_cnt": 1,
+   "reopen_count": 1,
+   "c08_eligible": true,
+   "open_cnt_rt": 1,
+   "reseal_ts": "10:44:06",
+   "turn": 4.84,
+   "plan": "D+1开盘买(开盘涨停不买) TP+5%/SL-8%(D+2起日级,TP优先,跳空按开盘) D+3收盘兜底",
+   "notify": true
+  },
+  {
+   "code": "sz.002329",
+   "name": "皇氏集团",
+   "first_seal_bar": "1110",
+   "first_seal_ts": "11:08:06",
+   "reopen_cnt": 1,
+   "reopen_count": 1,
+   "c08_eligible": true,
+   "open_cnt_rt": 1,
+   "reseal_ts": "11:21:03",
+   "turn": 13.83,
+   "plan": "D+1开盘买(开盘涨停不买) TP+5%/SL-8%(D+2起日级,TP优先,跳空按开盘) D+3收盘兜底",
+   "notify": true
+  }
+ ]
+}

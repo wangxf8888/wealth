@@ -1,0 +1,525 @@
+#!/usr/bin/env python3
+"""Task#183 打板影子信号滚动记账 —— 每日盘后维护SHADOW_LEDGER.md.
+
+职责(只读影子产物+腾讯行情, 零生产触碰):
+  1. 读取 research/results/shadow_surge/shadow_signals_*.json (仅live模式);
+  2. 出场复算: 出场规则=D+1 0940 bar开盘价定时卖(early_surge_chase_0940
+     引擎语义, minute.db右端点约定'0940'=09:35-09:40)。minute.db断供期间
+     出场价取腾讯m5(ifzq.gtimg.cn mkline, bar标签同右端点约定)D+1 0940
+     bar的open; 状态持久化到 shadow_exits.json(幂等, 已了结不重复请求);
+  3. 生成 SHADOW_LEDGER.md: 严格口径统计(胜率/均笔/等权累计) + 回测G5
+     基线(胜率53.02%/均笔+0.83%)对照 + 降级拦截统计;
+  4. 降级样本(vol_baseline=skipped, 8/6的26笔)单独追踪并标注
+     "降级样本不计入严格口径统计", 出场照常复算仅作参考;
+  5. Task#213盘中追踪衔接: 若存在当日shadow_tracking_summary则并入
+     "盘中追踪战报"段(封板率/炸板率/路径要点); 滚动表加列
+     盘中封板率/终态封板率; 另附可生产性滚动区块(累计信号/封板
+     成功率/模拟收益均笔/与G5基线对照/距实盘化差距结论)。
+
+口径说明(如实):
+  - 严格口径样本 = 有量能基线的信号(vol_ratio非空);
+  - 引擎语义笔(Task#229口径切换, 2026-08-08起) = 每日最早确认bar的非火箭
+    winner(slot=1, 每日最多1笔), 与t228回放A口径/G5基线530笔(530天×1笔)对齐;
+    旧per-bar口径(每bar winner非火箭)降为参考——t228回放实证bar2/bar3追加
+    winner为负贡献(87笔-0.19%), per-bar记账会污染30笔裁决样本;
+  - 累计测试战绩(准绳口径) = t228回放31日trades_engine_slot1.json(准绳,
+    2026-06-26~08-07) + 2026-08-07之后live slot=1笔拼接(重叠窗口以回放为准);
+  - 等权累计收益 = 逐笔收益率算术和(每笔等权1单位, 与回测solo口径一致);
+  - 跌停顺延语义(D+1 hour1封死跌停→顺延卖)未自动化, 如遇0940 bar
+    high==low且价格≈跌停价, 该笔标记need_review人工复核。
+
+运行: python3 tools/shadow_ledger.py [--no-fetch] [--no-notify]
+cron: 每交易日15:20盘后(见crontab Task#183条目)。
+红线: 只写 research/results/shadow_surge/{shadow_exits.json,
+SHADOW_LEDGER.md}; 限速: 请求间隔>=1s; Task#229: 仅发带⚠️测试标注的
+D+1模拟卖出结果通知(新了结slot=1笔, 幂等不重发), 零生产触碰不变。
+"""
+import argparse
+import glob
+import json
+import os
+import sys
+import time
+import urllib.request
+from datetime import datetime
+
+SS_DIR = '/home/AIWealth/research/results/shadow_surge'
+EXITS_PATH = os.path.join(SS_DIR, 'shadow_exits.json')
+LEDGER_PATH = os.path.join(SS_DIR, 'SHADOW_LEDGER.md')
+M5_URL = 'https://ifzq.gtimg.cn/appstock/app/kline/mkline?param={sym},m5,,{n}'
+QT_URL = 'https://qt.gtimg.cn/q={syms}'
+RATE_GAP = 1.0            # 请求最小间隔秒(限速铁律)
+MAX_REQ = 80              # 单次运行请求硬上限
+G5_BASELINE = {'trades': 530, 'win_rate': 53.02, 'avg_ret': 0.83,
+               'span': '2024-01-01~2026-07-31'}
+# Task#229 准绳口径: t228回放31日slot=1逐笔明细(用户裁决测试信号模式的考核基准)
+REPLAY_TRADES = ('/home/AIWealth/research/results/t228_surge_replay/'
+                 'trades_engine_slot1.json')
+REPLAY_END = '2026-08-07'          # 回放准绳覆盖终点(重叠窗口以回放为准)
+CALIBER_SWITCH_DATE = '2026-08-08'  # 引擎语义笔per-bar→slot=1口径切换日
+_last_req = [0.0]
+_req_count = [0]
+
+
+def _get(url):
+    if _req_count[0] >= MAX_REQ:
+        raise RuntimeError(f'请求数达硬上限{MAX_REQ}, 本次运行截断')
+    wait = RATE_GAP - (time.time() - _last_req[0])
+    if wait > 0:
+        time.sleep(wait)
+    req = urllib.request.Request(
+        url, headers={'User-Agent': 'Mozilla/5.0',
+                      'Referer': 'https://gu.qq.com/'})
+    raw = urllib.request.urlopen(req, timeout=15).read()
+    _last_req[0] = time.time()
+    _req_count[0] += 1
+    return raw
+
+
+def _sym(code):
+    return code.replace('.', '')          # 'sh.600156' -> 'sh600156'
+
+
+def load_signals():
+    """全部live信号, 按日期升序; 附分类标记。"""
+    sigs = []
+    for fp in sorted(glob.glob(os.path.join(SS_DIR, 'shadow_signals_*.json'))):
+        try:
+            data = json.load(open(fp))
+        except (OSError, ValueError):
+            continue
+        meta = data.get('meta', {})
+        if meta.get('mode') != 'live':
+            continue                       # dry-run自测不入台账
+        d = meta.get('date', '')
+        nb = (meta.get('skip_counts') or {}).get('no_vol_baseline', 0)
+        for s in data.get('signals', []):
+            sigs.append({
+                'sig_id': f"{d}_{s['code']}",
+                'date': d, 'code': s['code'], 'name': s.get('name', ''),
+                'buy_px': s['buy_px'], 'confirm_bar': s['confirm_bar'],
+                'vol_ratio': s.get('vol_ratio'),
+                'degraded': s.get('vol_baseline') == 'skipped',
+                'winner': bool(s.get('winner')),
+                'rocket': bool(s.get('rocket')),
+                'nb_skips': nb,
+            })
+    return sigs
+
+
+def pick_slot1(day_sigs):
+    """引擎slot=1口径当日唯一笔: 最早确认bar的非火箭winner(t228回放A口径)。"""
+    cands = [s for s in day_sigs
+             if s['winner'] and not s['rocket'] and not s['degraded']]
+    if not cands:
+        return None
+    return min(cands, key=lambda s: s['confirm_bar'])   # '0935'<'0940'<'0945'
+
+
+def slot1_trades(strict_sigs):
+    """strict信号→逐日slot=1笔列表(日期升序)。"""
+    by_day = {}
+    for s in strict_sigs:
+        by_day.setdefault(s['date'], []).append(s)
+    out = [w for w in (pick_slot1(v) for _, v in sorted(by_day.items())) if w]
+    return out
+
+
+def load_replay_trades():
+    """t228回放准绳逐笔(已了结)。文件缺失返回[](降级为纯live口径, 如实标注)。"""
+    try:
+        trades = json.load(open(REPLAY_TRADES))
+        return [t for t in trades if t.get('status') == 'closed']
+    except (OSError, ValueError):
+        return []
+
+
+def load_daily_intercepts():
+    """{date: no_vol_baseline拦截数} (live日)。"""
+    out = {}
+    for fp in sorted(glob.glob(os.path.join(SS_DIR, 'shadow_signals_*.json'))):
+        try:
+            data = json.load(open(fp))
+        except (OSError, ValueError):
+            continue
+        meta = data.get('meta', {})
+        if meta.get('mode') == 'live':
+            out[meta.get('date', '')] = \
+                (meta.get('skip_counts') or {}).get('no_vol_baseline', 0)
+    return out
+
+
+def load_tracking_summaries():
+    """{date: 盘中追踪summary} (Task#213 shadow_tracker产物, 全部日)。"""
+    out = {}
+    for fp in sorted(glob.glob(
+            os.path.join(SS_DIR, 'shadow_tracking_summary_*.json'))):
+        try:
+            s = json.load(open(fp))
+        except (OSError, ValueError):
+            continue
+        if s.get('date'):
+            out[s['date']] = s
+    return out
+
+
+def fetch_exit_px(code, sig_date, m5_cache):
+    """D+1 0940 bar开盘价: 腾讯m5中首个>sig_date且含0940 bar的日期。
+    返回 (exit_date, exit_px, need_review) 或 None(未到期/取不到)。"""
+    sym = _sym(code)
+    if sym not in m5_cache:
+        try:
+            data = json.loads(_get(M5_URL.format(sym=sym, n=400)))
+            m5_cache[sym] = (data.get('data', {}).get(sym, {}) or {}) \
+                .get('m5') or []
+        except Exception as e:
+            print(f'  [WARN] {code} m5获取失败: {e}')
+            m5_cache[sym] = []
+    days = {}
+    for b in m5_cache[sym]:
+        ts = str(b[0])
+        if len(ts) == 12 and ts[8:12] == '0940':
+            days[f'{ts[0:4]}-{ts[4:6]}-{ts[6:8]}'] = b
+    for d in sorted(days):
+        if d > sig_date:
+            b = days[d]
+            o, h, low = float(b[1]), float(b[3]), float(b[4])
+            need_review = bool(h == low)   # 一字bar疑似封死, 顺延语义人工复核
+            return d, o, need_review
+    return None
+
+
+def compute_stats(rows):
+    """逐笔收益统计: (n, 胜率%, 均笔%, 等权累计%)。"""
+    rets = [r['ret_pct'] for r in rows]
+    if not rets:
+        return 0, None, None, None
+    n = len(rets)
+    wr = sum(1 for r in rets if r > 0) / n * 100
+    return n, wr, sum(rets) / n, sum(rets)
+
+
+def fmt(v, suffix='%', signed=True):
+    if v is None:
+        return '—'
+    return f'{v:+.2f}{suffix}' if signed else f'{v:.2f}{suffix}'
+
+
+def build_exit_notice(sig, ex, cum):
+    """Task#229 D+1模拟卖出结果通知(红线: 必须带⚠️测试标注)。
+    返回 (text_msg, md_msg)。cum=(n, wr, avg, cum_ret) 准绳口径累计战绩。"""
+    if '/home/AIWealth' not in sys.path:
+        sys.path.insert(0, '/home/AIWealth')
+    from realtime.notify import DISCLAIMER, SEPARATOR
+    n, wr, avg, cum_ret = cum
+    ret = ex['ret_pct']
+    body = [
+        f"信号：{sig['name']}（{sig['code']}） {sig['date']}模拟买入"
+        f"¥{sig['buy_px']:.2f}",
+        f"卖出：{ex['exit_date']} 09:40bar开盘 ¥{ex['exit_px']:.2f}"
+        + ("（⚠一字bar疑似封死, 待人工复核）" if ex.get('need_review')
+           else ''),
+        f'模拟收益：{ret:+.2f}%',
+        f'累计测试战绩：{n}笔 胜率{fmt(wr, "%", False)} '
+        f'笔均{fmt(avg)} 累计{fmt(cum_ret)}',
+        '测试信号·非实盘交易·实盘资金无操作',
+    ]
+    text_msg = '\n'.join(['⚠️冲板测试信号·D+1模拟卖出（非实盘）', SEPARATOR]
+                         + body + [SEPARATOR, DISCLAIMER])
+    md_msg = '\n'.join(['**⚠️冲板测试信号·D+1模拟卖出（非实盘）**', SEPARATOR]
+                       + body + [SEPARATOR, DISCLAIMER])
+    return text_msg, md_msg
+
+
+def main():
+    ap = argparse.ArgumentParser()
+    ap.add_argument('--no-fetch', action='store_true',
+                    help='不发任何网络请求(只用已持久化的出场记录重算台账)')
+    ap.add_argument('--no-notify', action='store_true',
+                    help='不发D+1测试结果通知(手工重算/自测用)')
+    args = ap.parse_args()
+    now = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+    today = datetime.now().strftime('%Y-%m-%d')
+    print(f'[shadow_ledger] {now} 开始 (no_fetch={args.no_fetch})')
+
+    sigs = load_signals()
+    intercepts = load_daily_intercepts()
+    trackings = load_tracking_summaries()   # Task#213盘中追踪产物
+    exits = {}
+    if os.path.exists(EXITS_PATH):
+        try:
+            exits = json.load(open(EXITS_PATH))
+        except (OSError, ValueError):
+            exits = {}
+
+    # ---- 出场复算(幂等: 已了结跳过; 未到期跳过) ----
+    new_exit_ids = []          # 本次运行新了结的sig_id(Task#229 D+1通知用)
+    m5_cache = {}
+    if not args.no_fetch:
+        for s in sigs:
+            if s['sig_id'] in exits or s['date'] >= today:
+                continue                   # 已了结 / D+1未到
+            try:
+                got = fetch_exit_px(s['code'], s['date'], m5_cache)
+            except RuntimeError as e:
+                print(f'  [WARN] {e}')
+                break
+            if got:
+                ed, px, review = got
+                exits[s['sig_id']] = {
+                    'exit_date': ed, 'exit_px': px,
+                    'ret_pct': round((px / s['buy_px'] - 1) * 100, 4),
+                    'src': 'tencent_m5_0940_open',
+                    'need_review': review,
+                    'recorded_at': now,
+                }
+                new_exit_ids.append(s['sig_id'])
+                print(f"  [exit] {s['sig_id']} {s['name']} "
+                      f"buy={s['buy_px']} -> {ed} 0940o={px} "
+                      f"ret={exits[s['sig_id']]['ret_pct']:+.2f}%"
+                      f"{' [need_review:一字bar疑似封死]' if review else ''}")
+        with open(EXITS_PATH, 'w', encoding='utf-8') as f:
+            json.dump(exits, f, ensure_ascii=False, indent=1)
+
+    # ---- 分口径统计 ----
+    for s in sigs:
+        e = exits.get(s['sig_id'])
+        s['ret_pct'] = e['ret_pct'] if e else None
+        s['exit'] = e
+    strict = [s for s in sigs if not s['degraded']]
+    degraded = [s for s in sigs if s['degraded']]
+    # Task#229口径切换: 引擎语义笔 = 每日最早确认bar非火箭winner(slot=1)
+    st_eng = slot1_trades(strict)
+    st_perbar = [s for s in strict if s['winner'] and not s['rocket']]  # 旧口径参考
+    closed_eng = [s for s in st_eng if s['ret_pct'] is not None]
+    closed_pb = [s for s in st_perbar if s['ret_pct'] is not None]
+    closed_all = [s for s in strict if s['ret_pct'] is not None]
+    closed_dg = [s for s in degraded if s['ret_pct'] is not None]
+    n_e, wr_e, avg_e, cum_e = compute_stats(closed_eng)
+    n_pb, wr_pb, avg_pb, cum_pb = compute_stats(closed_pb)
+    n_a, wr_a, avg_a, cum_a = compute_stats(closed_all)
+    n_d, wr_d, avg_d, cum_d = compute_stats(closed_dg)
+
+    # ---- Task#229 累计测试战绩(准绳口径): t228回放 + REPLAY_END后live slot=1 ----
+    replay_closed = load_replay_trades()
+    post_live = [s for s in closed_eng if s['date'] > REPLAY_END]
+    comb_rows = ([{'ret_pct': t['profit_pct']} for t in replay_closed]
+                 + [{'ret_pct': s['ret_pct']} for s in post_live])
+    n_c, wr_c, avg_c, cum_c = compute_stats(comb_rows)
+
+    # ---- Task#229 D+1模拟卖出结果通知(仅新了结的slot=1笔, 幂等不重发) ----
+    if not args.no_notify:
+        slot1_ids = {s['sig_id'] for s in st_eng}
+        to_notify = [s for s in st_eng
+                     if s['sig_id'] in new_exit_ids and s['sig_id'] in slot1_ids]
+        for s in to_notify[-3:]:           # 硬上限3条防积压刷屏(正常=每日1条)
+            try:
+                if '/home/AIWealth' not in sys.path:
+                    sys.path.insert(0, '/home/AIWealth')
+                from realtime.notify import send_qywx, send_text
+                text_msg, md_msg = build_exit_notice(
+                    s, s['exit'], (n_c, wr_c, avg_c, cum_c))
+                send_text(text_msg)
+                send_qywx(md_msg, msgtype='markdown')
+                print(f"  [notify] ⚠️D+1测试卖出结果已推送: {s['sig_id']} "
+                      f"{s['ret_pct']:+.2f}%")
+            except Exception as e:
+                print(f'  [notify] D+1结果通知失败(非致命): {e}')
+
+    # 未了结degraded winner的纸面浮动(qt快照, 一次批量请求)
+    floats = {}
+    open_dg_w = [s for s in degraded
+                 if s['ret_pct'] is None and s['winner']]
+    if open_dg_w and not args.no_fetch:
+        try:
+            raw = _get(QT_URL.format(
+                syms=','.join(_sym(s['code']) for s in open_dg_w))) \
+                .decode('gbk', errors='replace')
+            for line in raw.split(';'):
+                if '="' not in line:
+                    continue
+                sym = line.split('=')[0].strip().lstrip('v_')
+                f = line.split('"')[1].split('~')
+                if len(f) > 3 and float(f[3] or 0) > 0:
+                    floats[sym] = float(f[3])
+        except Exception as e:
+            print(f'  [WARN] 浮动快照获取失败: {e}')
+
+    # ---- 生成LEDGER ----
+    live_days = sorted({s['date'] for s in sigs} | set(intercepts))
+    L = []
+    L.append('# 打板影子信号滚动台账 (SHADOW_LEDGER)')
+    L.append('')
+    L.append(f'- 更新时间: {now} (tools/shadow_ledger.py, Task#183)')
+    L.append(f'- 策略: 早盘冲板追击(early_surge_chase_0940)影子探测, '
+             f'出场=D+1 0940 bar开盘定时卖(腾讯m5复算)')
+    L.append(f'- live运行日: {", ".join(live_days) or "无"}')
+    L.append('')
+    L.append('## 严格口径统计 (有量能基线信号; 主统计=引擎语义笔'
+             '=每日slot=1唯一笔, 与G5基线530笔(530天×1笔)口径对齐)')
+    L.append('')
+    L.append('| 口径 | 累计信号 | 已了结 | 胜率 | 均笔收益 | 等权累计收益 |')
+    L.append('|---|---|---|---|---|---|')
+    L.append(f'| 引擎语义笔(slot=1) | {len(st_eng)} | {n_e} | '
+             f'{fmt(wr_e, "%", False)} | {fmt(avg_e)} | {fmt(cum_e)} |')
+    L.append(f'| 旧per-bar口径(参考) | {len(st_perbar)} | {n_pb} | '
+             f'{fmt(wr_pb, "%", False)} | {fmt(avg_pb)} | {fmt(cum_pb)} |')
+    L.append(f'| 全信号(参考) | {len(strict)} | {n_a} | '
+             f'{fmt(wr_a, "%", False)} | {fmt(avg_a)} | {fmt(cum_a)} |')
+    L.append(f'| **回测G5基线** | {G5_BASELINE["trades"]} '
+             f'({G5_BASELINE["span"]}) | 全部 | '
+             f'{G5_BASELINE["win_rate"]:.2f}% | '
+             f'+{G5_BASELINE["avg_ret"]:.2f}% | — |')
+    L.append('')
+    L.append(f'> **口径切换({CALIBER_SWITCH_DATE}, Task#229)**: 引擎语义笔'
+             '从per-bar口径(每bar winner非火箭)切换为每日最早确认bar的'
+             '非火箭winner(slot=1, 每日最多1笔)。原因: Task#228回放实证'
+             'bar2/bar3追加winner为负贡献(per-bar 87笔均笔-0.19%), '
+             'per-bar记账会污染裁决样本; slot=1与回放A口径/G5基线对齐。')
+    L.append(f'> 统计效力: 已了结引擎语义笔 n={n_e}, <20笔前任何对照'
+             '仅作快照参考, 无统计意义(t178审计口径)。')
+    L.append('')
+
+    # ---- Task#229 累计测试战绩(准绳口径) ----
+    L.append('## 累计测试战绩 (Task#229准绳口径, 测试信号模式考核基准)')
+    L.append('')
+    L.append(f'| 总笔数 | 胜率 | 笔均 | 累计模拟收益 |')
+    L.append('|---|---|---|---|')
+    L.append(f'| {n_c} | {fmt(wr_c, "%", False)} | {fmt(avg_c)} | '
+             f'{fmt(cum_c)} |')
+    L.append('')
+    L.append(f'- 构成: t228回放31日准绳{len(replay_closed)}笔'
+             f'(trades_engine_slot1.json, 2026-06-26~{REPLAY_END}) + '
+             f'{REPLAY_END}之后live slot=1已了结{len(post_live)}笔; '
+             '重叠窗口以回放为准(全市场无偏)。')
+    L.append('- 测试期考核标准(20交易日): 胜率≥48% 且 笔均>0 '
+             '(详见docs/strategies/早盘冲板追击_测试信号说明.md)。')
+    L.append('')
+
+    # ---- Task#213 盘中追踪战报(当日) + 滚动表 + 可生产性区块 ----
+    ts_today = trackings.get(today)
+    if ts_today:
+        fin = '终态定格' if ts_today.get('finished') else '盘中实时'
+        L.append(f'## 盘中追踪战报 {today} ({fin}, tools/shadow_tracker.py '
+                 f'Task#213, 5分钟轮询)')
+        L.append('')
+        L.append(f'- 信号{ts_today["n_signals"]}笔: '
+                 f'触板{ts_today["n_touched"]} / 曾封板{ts_today["n_sealed_ever"]} / '
+                 f'炸板{ts_today["n_broken_ever"]} / '
+                 f'假信号(全程未触板){ts_today["n_false_signal"]}; '
+                 f'盘中封板率{ts_today["seal_rate_intraday_pct"]}%'
+                 + (f', 终态封板率{ts_today["seal_rate_final_pct"]}%'
+                    if ts_today.get('seal_rate_final_pct') is not None
+                    else ''))
+        g5 = ts_today.get('sim_g5') or {}
+        L.append(f'- G5规则模拟(引擎语义笔{g5.get("n_engine_trades", 0)}笔): '
+                 f'当日浮动均笔{fmt(g5.get("avg_float_ret_pct"))} '
+                 f'(终局收益以D+1 0940复算为准)')
+        L.append('- 路径要点:')
+        for sg in ts_today.get('signals', []):
+            seg = [f'触板{sg["touch_ts"]}' if sg.get('touched') else '未触板']
+            if sg.get('first_seal_ts'):
+                seg.append(f'首封{sg["first_seal_ts"]}')
+            if sg.get('break_count'):
+                seg.append(f'炸板{sg["break_count"]}次')
+            seg.append(f'最高溢价{fmt(sg.get("max_premium_pct"))}')
+            seg.append(f'最深回撤{fmt(sg.get("max_drawdown_pct"))}')
+            L.append(f'  - {sg["name"]}({sg["code"]}) '
+                     f'[{sg.get("final_state") or sg["state"]}]: '
+                     + ' / '.join(seg))
+        L.append('')
+    if trackings:
+        L.append('## 盘中追踪滚动表 (Task#213, 逐日)')
+        L.append('')
+        L.append('| 日期 | 信号 | 触板 | 曾封板 | 炸板 | 假信号 | '
+                 '盘中封板率 | 终态封板率 |')
+        L.append('|---|---|---|---|---|---|---|---|')
+        for d in sorted(trackings):
+            t = trackings[d]
+            fr = t.get('seal_rate_final_pct')
+            L.append(
+                f'| {d} | {t["n_signals"]} | {t["n_touched"]} | '
+                f'{t["n_sealed_ever"]} | {t["n_broken_ever"]} | '
+                f'{t["n_false_signal"]} | {t["seal_rate_intraday_pct"]}% | '
+                f'{str(fr) + "%" if fr is not None else "盘中"} |')
+        L.append('')
+        # 可生产性滚动区块: 追踪日累计 + 与G5基线对照 + 差距结论
+        cum_n = sum(t['n_signals'] for t in trackings.values())
+        cum_seal = sum(t['n_sealed_ever'] for t in trackings.values())
+        seal_rate = cum_seal / cum_n * 100 if cum_n else None
+        L.append('## 可生产性滚动评估 (Task#213, 持续证据链)')
+        L.append('')
+        L.append(f'- 盘中追踪覆盖: {len(trackings)}个交易日, '
+                 f'累计信号{cum_n}笔, 封板成功率'
+                 f'{fmt(seal_rate, "%", False)}')
+        L.append(f'- 模拟收益(严格口径引擎语义笔, D+1复算已了结n={n_e}): '
+                 f'胜率{fmt(wr_e, "%", False)} 均笔{fmt(avg_e)} vs '
+                 f'G5基线胜率{G5_BASELINE["win_rate"]}%/均笔'
+                 f'+{G5_BASELINE["avg_ret"]}%')
+        n_total_eng = len(st_eng)
+        if n_total_eng < 30:
+            verdict = (f'样本量不足(引擎语义笔累计{n_total_eng}<30), '
+                       '继续影子观察, 不具备实盘化裁决条件')
+        elif wr_e is not None and wr_e >= G5_BASELINE['win_rate'] - 5 \
+                and avg_e is not None and avg_e > 0:
+            verdict = (f'样本{n_total_eng}笔且胜率/均笔不劣于基线-5pp, '
+                       '可提交实盘化评审')
+        else:
+            verdict = (f'样本{n_total_eng}笔但胜率/均笔距基线有差距, '
+                       '需归因分析后再裁决')
+        L.append(f'- 距实盘化差距结论: {verdict}')
+        L.append('')
+    L.append('## 降级拦截统计 (STRICT口径: 无量能基线不发信号)')
+    L.append('')
+    L.append('| 日期 | no_vol_baseline拦截 | 降级放行信号(修复前遗留) |')
+    L.append('|---|---|---|')
+    dg_by_day = {}
+    for s in degraded:
+        dg_by_day[s['date']] = dg_by_day.get(s['date'], 0) + 1
+    for d in live_days:
+        L.append(f'| {d} | {intercepts.get(d, 0)} | {dg_by_day.get(d, 0)} |')
+    L.append('')
+    if degraded:
+        L.append('## 降级样本追踪 (**不计入严格口径统计**, 仅纸面参考)')
+        L.append('')
+        L.append(f'2026-08-05 22:11改版引入的降级放行缺陷所产信号'
+                 f'(Task#183已修复, 详见research/results/t183_shadow_fix/)。'
+                 f'共{len(degraded)}笔, 已了结{n_d}笔'
+                 + (f'(胜率{fmt(wr_d, "%", False)} 均笔{fmt(avg_d)} '
+                    f'等权累计{fmt(cum_d)})' if n_d else '') + '。')
+        L.append('')
+        L.append('| 信号日 | 代码 | 名称 | 买入价 | 标记 | 出场 | 收益 |')
+        L.append('|---|---|---|---|---|---|---|')
+        for s in degraded:
+            mark = ('★winner' if s['winner'] else '') + \
+                   ('🚀火箭(引擎拒单)' if s['rocket'] else '')
+            if s['exit']:
+                ex = (f"{s['exit']['exit_date']} @{s['exit']['exit_px']}"
+                      + (' ⚠need_review' if s['exit'].get('need_review')
+                         else ''))
+                ret = fmt(s['ret_pct'])
+            elif _sym(s['code']) in floats:
+                px = floats[_sym(s['code'])]
+                ex = f'OPEN(现价{px})'
+                ret = fmt((px / s['buy_px'] - 1) * 100) + '(浮动)'
+            else:
+                ex, ret = 'OPEN', '—'
+            L.append(f"| {s['date']} | {s['code']} | {s['name']} | "
+                     f"{s['buy_px']} | {mark or '—'} | {ex} | {ret} |")
+        L.append('')
+    L.append('## 口径备注')
+    L.append('')
+    L.append('- 等权累计收益=逐笔收益率算术和(每笔等权1单位)。')
+    L.append('- 出场价=D+1 minute右端点约定0940 bar(09:35-09:40)开盘价, '
+             'minute.db断供期取腾讯m5同标签bar open。')
+    L.append('- 跌停顺延(D+1 hour1封死跌停→hour2起顺延卖)未自动化: '
+             '0940 bar一字时标need_review人工复核。')
+    with open(LEDGER_PATH, 'w', encoding='utf-8') as f:
+        f.write('\n'.join(L) + '\n')
+    print(f'[shadow_ledger] 台账已更新: {LEDGER_PATH} '
+          f'(严格口径引擎语义: 信号{len(st_eng)}/了结{n_e}; '
+          f'降级样本{len(degraded)}/了结{n_d}; 请求数{_req_count[0]})')
+
+
+if __name__ == '__main__':
+    main()

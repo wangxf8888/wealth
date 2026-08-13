@@ -116,8 +116,8 @@ crontab -e
 # 盘后18:30 - 更新日K线数据
 30 18 * * 1-5 /bin/bash /home/AIWealth/tools/daily_update.sh
 
-# 盘后22:00 - 生成次日候选股（需等待日K数据更新完成，通常18:30~21:00）
-0 22 * * 1-5 cd /home/AIWealth && python3 realtime/generate_candidates.py
+# 盘后21:30 - 生成次日候选股（需等待日K数据更新完成，通常18:30~20:55；脚本内置完整性门兜底）
+30 21 * * 1-5 cd /home/AIWealth && python3 realtime/generate_candidates.py
 
 # 盘前9:25 - 早间决策（获取实时开盘价，确认买入）
 25 9 * * 1-5 cd /home/AIWealth && python3 realtime/morning_decision.py
@@ -148,7 +148,7 @@ crontab -e
 
 ```
 盘后 18:30   daily_update.sh         → 增量更新日K线+小时K线数据（耗时约1~3小时）
-盘后 22:00   generate_candidates.py  → 扫描5策略生成候选股列表（依赖日K数据更新完成）
+盘后 21:30   generate_candidates.py  → 扫描5策略生成候选股列表（依赖日K数据更新完成，20:45财报日历先行刷新）
 盘前  9:25   morning_decision.py     → 获取实时开盘价，确认买入信号
 盘中 10-15   position_tracker.py     → 监控止盈/止损/到期卖出
 ```

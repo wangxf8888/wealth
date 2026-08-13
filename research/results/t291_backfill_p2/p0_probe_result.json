@@ -1,0 +1,28 @@
+{
+ "recent": {
+  "window": [
+   "2026-08-03",
+   "2026-08-07"
+  ],
+  "err": null,
+  "pages": 1,
+  "n_rows": 0,
+  "n_days": 0,
+  "bars_per_day": {},
+  "first_row": null,
+  "last_row": null
+ },
+ "y2021": {
+  "window": [
+   "2021-01-04",
+   "2021-01-08"
+  ],
+  "err": null,
+  "pages": 1,
+  "n_rows": 0,
+  "n_days": 0,
+  "bars_per_day": {},
+  "first_row": null,
+  "last_row": null
+ }
+}

@@ -21,3 +21,14 @@ logs/
 # Temp
 *.tmp
 *.bak
+nohup.out
+*.out
+
+# Secrets
+.qywx_env.sh
+*.env
+.baostock*
+
+# Big runtime artifacts (>10MB, du核对于t328)
+node_modules/
+research/results/t291_backfill_p2/plan2.json

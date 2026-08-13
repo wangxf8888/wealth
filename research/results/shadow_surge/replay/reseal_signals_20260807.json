@@ -1,0 +1,48 @@
+{
+ "meta": {
+  "strategy": "回封首板(seal_reseal_v1, Task#232)",
+  "date": "2026-08-07",
+  "mode": "replay_minute",
+  "started_at": "2026-08-08 15:55:56",
+  "rule": "V1: T3(1005-1130)首封∩开板重封>=1∩首板∩收盘封死∩非ST/bj/上市<90d; D+1开盘买 TP5/SL-8/H3",
+  "replay_baseline": "31日回放(2026-06-26~08-07): slot=1月化+32.6%/胜率75%; 笔级n=89 净+1.08%/胜率68.5%",
+  "coverage": {
+   "synth_codes": 60
+  },
+  "prev_date": "2026-08-06",
+  "status": "ok",
+  "drop_counts": {
+   "no_reopen": 13,
+   "not_firstboard": 12,
+   "first_seal_out_of_T3": 31,
+   "ipo90d": 1
+  },
+  "finished_at": "2026-08-08 15:55:57"
+ },
+ "signals": [
+  {
+   "code": "sz.002281",
+   "name": "光迅科技",
+   "first_seal_bar": "1010",
+   "first_seal_ts": "10:10:00",
+   "reopen_cnt": 3,
+   "open_cnt_rt": 3,
+   "reseal_ts": "14:55:00",
+   "turn": 8.9,
+   "plan": "D+1开盘买(开盘涨停不买) TP+5%/SL-8%(D+2起日级,TP优先,跳空按开盘) D+3收盘兜底",
+   "notify": true
+  },
+  {
+   "code": "sh.600183",
+   "name": "生益科技",
+   "first_seal_bar": "1030",
+   "first_seal_ts": "10:30:00",
+   "reopen_cnt": 3,
+   "open_cnt_rt": 3,
+   "reseal_ts": "14:45:00",
+   "turn": 3.247,
+   "plan": "D+1开盘买(开盘涨停不买) TP+5%/SL-8%(D+2起日级,TP优先,跳空按开盘) D+3收盘兜底",
+   "notify": true
+  }
+ ]
+}

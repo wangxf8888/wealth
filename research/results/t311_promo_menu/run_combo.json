@@ -1,0 +1,102 @@
+{
+ "tag": "combo",
+ "gate": "P70_w0.3(131d)",
+ "s5_exit": "h1_touch",
+ "ice_spec": "ice35:0.3:repair_exempt",
+ "dd_boost": "15:1.5(native)",
+ "start": "2021-01-01",
+ "end": "2026-07-01",
+ "strategies": [
+  "big_yang_low_open_v2",
+  "firstboard_low_open_dip_v2",
+  "gem_star_late_seal",
+  "amplitude_reversal",
+  "two_board_pullback_dip_h1c"
+ ],
+ "summary": {
+  "start_date": "2021-01-01",
+  "end_date": "2026-07-01",
+  "initial_capital": 1000000.0,
+  "final_nav": 284615591.89,
+  "total_return_pct": 28361.56,
+  "cagr_pct": 182.22,
+  "max_drawdown_pct": 20.25,
+  "n_trades": 2893,
+  "win_rate_pct": 51.05,
+  "avg_profit_pct": 1.05,
+  "avg_hold_hours": 6.47,
+  "per_strategy": {
+   "firstboard_low_open_dip_v2": {
+    "n_trades": 247,
+    "win_rate_pct": 62.75,
+    "avg_profit_pct": 1.69
+   },
+   "amplitude_reversal": {
+    "n_trades": 502,
+    "win_rate_pct": 55.18,
+    "avg_profit_pct": 1.07
+   },
+   "two_board_pullback_dip_h1c": {
+    "n_trades": 1157,
+    "win_rate_pct": 47.88,
+    "avg_profit_pct": 0.87
+   },
+   "big_yang_low_open_v2": {
+    "n_trades": 535,
+    "win_rate_pct": 49.35,
+    "avg_profit_pct": 0.9
+   },
+   "gem_star_late_seal": {
+    "n_trades": 452,
+    "win_rate_pct": 50.22,
+    "avg_profit_pct": 1.32
+   }
+  },
+  "yearly_returns": {
+   "2021": 231.99,
+   "2022": 125.84,
+   "2023": 127.52,
+   "2024": 122.27,
+   "2025": 378.33,
+   "2026": 57.37
+  },
+  "calmar": 9.0
+ },
+ "audit": {
+  "cash_min": 8.163740007847082,
+  "max_cost_over_nav": 0.29999965939771006,
+  "n_partial": 78,
+  "n_buys": 2896,
+  "t0_sell_blocked": 0,
+  "price_clamped": 0,
+  "cash_ge0_all": true,
+  "single_pos_le_cap": true,
+  "gate_day_cap_ok": true,
+  "n_gate_day_buys": 292,
+  "t1_violations": 0,
+  "s5_trades": 1157,
+  "s5_reasons": {
+   "expired": 1074,
+   "touch_board": 83
+  },
+  "priority_chain": {
+   "ice_reduce": 275,
+   "gate_eff": 120,
+   "ice_exempt": 14,
+   "boost": 61,
+   "plain": 859,
+   "gate_boost_suppressed": 0
+  },
+  "priority_violations": 0
+ },
+ "overlay_days": {
+  "n_gate_eff": 120,
+  "n_gate_ice_overlap": 11,
+  "n_ice_scaled": 275,
+  "n_ice_exempt": 14,
+  "n_boost_eff": 61,
+  "n_boost_wanted": 126,
+  "n_boost_ice_suppressed": 53
+ },
+ "elapsed_sec": 1233.1
+}

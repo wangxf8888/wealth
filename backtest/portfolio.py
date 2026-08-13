@@ -43,6 +43,7 @@ class Portfolio:
         self.initial_capital = initial_capital
         self.cost_rate = cost_rate
         self.cash = initial_capital
+        self.buy_scale = 1.0  # Task#44: 当日买入系数(引擎每日设置, 默认1.0=零侵入)
         # slot_id -> Position | None
         self.slots = {i: None for i in range(n_slots)}
         self.trades: List[TradeRecord] = []
@@ -77,7 +78,8 @@ class Portfolio:
         if signal.code in self.held_codes():
             return False
 
-        target_amount = self.get_nav() / self.n_slots
+        # Task#44: 买入金额 = NAV/n_slots × 当日仓位系数(默认1.0)
+        target_amount = self.get_nav() / self.n_slots * self.buy_scale
         buy_amount = min(target_amount, self.cash)
         shares = int(buy_amount / (price * (1 + self.cost_rate)) / 100) * 100
         if shares <= 0:

@@ -6,25 +6,26 @@
   买入: 今日hour1 open (9:30开盘价)
   选股: amp2最大的top_n只中选turn最低的1只(低换手=筹码集中=弹性大)
   止盈: +5% (HIGH触发精确成交)
-  止损: -15% (LOW触发精确成交) - 宽止损避免波动股过早出局
-  到期: max_hold_hours=8 (D+1 hour4 close卖出)
+  止损: -25% (LOW触发精确成交) - 实质安全网(回测六年零触发, 亏损均由到期退出)
+  到期: max_hold_hours=8 (hours_held>=8 且 hour==4 → D+2 hour4 close卖出)
+  弱市到期提前(expam35, Task#204 2026-08-06用户批准转正):
+    弱市日(D-1非ST涨停家数<35)买入的仓位, 到期出场提前至D+2早盘open
+    (hours_held>=8后首个hour以open离场, gap先判TP/SL) — t165/t173 QA口径,
+    弱市日隔夜持有到收盘期望为负, 早盘流动性窗口离场。
 
 核心逻辑:
   昨日冲高回落(大上影线)→ 被套资金T+1才能卖 → 次日恐慌低开 → 卖压过度 → 反弹
 
-回测结果(2021-01-01 ~ 2026-07-01, slot=1, 引擎含手续费):
-  amp2>=4%, TP=5%, SL=-15%, hold=8h:
-  CAGR: +121.69% | 笔数: 507 | 胜率: 55.82% | MDD: 59.10% | 均收益: +1.26%/笔
-  分年度(TP=5%,SL=-8%): 2021:+172%, 2022:-20%, 2023:-3%, 2024:+68%, 2025:+209%, 2026:+65%
+回测结果(2021-01-01 ~ 2026-07-01, slot=1, 引擎含手续费, expam35口径):
+  CAGR: +107.24% | 笔数: 503 | 胜率: 54.27% | MDD: 56.42% | final_nav 52,931,624.07
+  分年: 2021:+88.83, 2022:+117.30, 2023:+4.27, 2024:+161.68, 2025:+318.90, 2026:+13.52
+  (净化基线97.52→107.24, 64笔出场diff: 60笔expired时点迁移+4笔TP截胡,
+   买入路径503笔零变化; 证据research/results/t173_s2_promote_qa/QA_REPORT.md)
 """
-import re
 from typing import Optional
 
+import trading_rules
 from strategies.base import Strategy, Signal, SellSignal
-
-
-_CYB_PATTERN = re.compile(r'^sz\.30[01]')
-_STAR_PATTERN = re.compile(r'^sh\.688')
 
 
 class AmplitudeReversalStrategy(Strategy):
@@ -37,7 +38,10 @@ class AmplitudeReversalStrategy(Strategy):
     min_amp2_pct = 4.0           # 昨日振幅强度2最低门槛(%) - 上影线减去下影线
     max_open_rate = 0.0          # 今日必须低开(open_rate < 0)
     take_profit_pct = 0.05       # 止盈 +5% (HIGH触发)
-    stop_loss_pct = -0.15        # 止损 -15% (LOW触发) - 宽止损避免过早止损
+    # [Task#40 2026-07-25 参数v2切换] SL -0.15→-0.25, 依据: Task#37重校准+QA放行报告
+    # data/realtime/QA_AUDIT_S1S2_V2_REPORT.md (CAGR 87.63→93.05; -25%六年零触发=纯安全网,
+    # 释放v1中9笔被-15%提前止损的仓位由到期机制退出)
+    stop_loss_pct = -0.25        # 止损 -25% (LOW触发) - 极端安全网
     top_n = 5                    # 取amp2最大的前N只中turn最低的1只
 
     # 过滤条件
@@ -45,24 +49,36 @@ class AmplitudeReversalStrategy(Strategy):
     max_turn = 30.0              # 最高换手率(%), 过滤异常
     min_amount = 5000            # 最低成交额(万), 过滤流动性差的
 
+    # [Task#204 2026-08-06 expam35转正] 弱市日历阈值: D-1非ST涨停家数<35
+    weak_exit_threshold = 35
+
     def __init__(self):
         self._cand_codes = []
         self._cand_date = None
+        self._weak_days = None   # 弱市日全集(懒加载, 仅回测数据源激活)
+
+    def _ensure_weak_days(self, data_feed):
+        """弱市日历懒加载: 仅backtest数据源运行时从stocks.db实时计算
+        (与t173 QA A口径/PositionScaler._build逐位同源); 实盘数据源置空集,
+        弱市分支inert(实盘AM离场由realtime侧ExitEngine落地, 边界隔离)。"""
+        if self._weak_days is not None:
+            return
+        if type(data_feed).__module__.startswith('backtest'):
+            from backtest.position_scale import compute_weak_market_days
+            self._weak_days = frozenset(compute_weak_market_days(
+                data_feed.db_path, self.weak_exit_threshold))
+        else:
+            self._weak_days = frozenset()
 
     @staticmethod
     def _is_st(info) -> bool:
+        # ST双保险判定: isST字段 ∨ 名称含ST(大写化) ∨ 名称含'退'(退市整理期, Task#143对齐S3/S4的#136写法)
         if info.get('isST'):
             return True
         name = str(info.get('code_name') or '')
-        if 'ST' in name.upper():
+        if 'ST' in name.upper() or '退' in name:
             return True
         return False
-
-    @staticmethod
-    def _get_limit_ratio(code):
-        if _CYB_PATTERN.match(code) or _STAR_PATTERN.match(code):
-            return 1.20
-        return 1.10
 
     def get_candidates(self, date, data_feed):
         """筛选候选股 - 用prev_day计算大上影信号 + 今日低开过滤。"""
@@ -93,8 +109,9 @@ class AmplitudeReversalStrategy(Strategy):
             preclose = info.get('preclose') or 0.0
             if open_price <= 0 or preclose <= 0:
                 continue
-            limit_ratio = self._get_limit_ratio(code)
-            if open_price >= round(preclose * limit_ratio, 2):
+            # [Task#299] 涨停价统一trading_rules.limit_prices(Decimal ROUND_HALF_UP
+            # 交易所口径), 替换round自算旁路(t292审计P0)
+            if open_price >= trading_rules.limit_prices(code, preclose)[0]:
                 continue
 
             # 获取前日OHLC
@@ -159,11 +176,13 @@ class AmplitudeReversalStrategy(Strategy):
         if date != self._cand_date or code not in self._cand_codes:
             return None
 
-        # 防止同日再入场：卖出当天不买新股（与快速模拟一致）
-        if portfolio.trades:
-            last_trade = portfolio.trades[-1]
-            if last_trade.sell_date == date:
-                return None
+        # 防止同日再入场：本策略卖出当天不买新股（与快速模拟一致）
+        # [Task#13修复] 原实现读共享组合全局trades[-1], 在多策略组合中被其他策略
+        # 的卖出事件误拦截(B2-A每日H1卖出时S2笔数396→53); solo审计基线(507笔)
+        # 即own-strategy语义, 修复后组合口径与solo/实盘框架三方一致
+        own_trades = [t for t in portfolio.trades if t.strategy_name == self.name]
+        if own_trades and own_trades[-1].sell_date == date:
+            return None
 
         price = data_feed.get_hour_open(code, date, hour)
         if not price or price <= 0:
@@ -179,6 +198,21 @@ class AmplitudeReversalStrategy(Strategy):
         # T+1合规：买入当日禁止卖出
         if position.buy_date == date:
             return None
+
+        # [Task#204 expam35] 弱市日买入仓到期(hours_held>=8) → 首个hour以open
+        # 离场(D+2早盘), gap先判TP/SL — 语义逐行对齐t173 QAExpAM(503笔diff=0)
+        self._ensure_weak_days(data_feed)
+        if (position.buy_date in self._weak_days
+                and position.hours_held >= self.max_hold_hours):
+            o = data_feed.get_hour_open(position.code, date, hour)
+            if not o or o <= 0:
+                return None
+            pnl = (o - position.buy_price) / position.buy_price
+            if pnl >= self.take_profit_pct:
+                return SellSignal(reason='take_profit', price=float(o))
+            if pnl <= self.stop_loss_pct:
+                return SellSignal(reason='stop_loss', price=float(o))
+            return SellSignal(reason='expired', price=float(o))
 
         buy_price = position.buy_price
         if buy_price <= 0:

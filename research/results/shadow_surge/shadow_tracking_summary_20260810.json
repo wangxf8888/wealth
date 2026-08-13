@@ -1,0 +1,440 @@
+{
+ "date": "2026-08-10",
+ "updated_at": "2026-08-10 15:00:09",
+ "round_no": 45,
+ "finished": true,
+ "n_signals": 13,
+ "n_touched": 9,
+ "n_sealed_ever": 9,
+ "n_sealed_now": 7,
+ "n_broken_ever": 4,
+ "n_false_signal": 4,
+ "seal_rate_intraday_pct": 69.2,
+ "seal_rate_final_pct": 53.8,
+ "sim_g5": {
+  "note": "引擎语义笔=winner且非火箭, 持有至D+1 0940开盘卖; 本表为当日浮动(终局由15:20台账D+1复算)",
+  "n_engine_trades": 3,
+  "float_rets_pct": {
+   "sh.605198": -1.76,
+   "sh.605033": 1.4,
+   "sh.603038": 3.72
+  },
+  "avg_float_ret_pct": 1.12
+ },
+ "signals": [
+  {
+   "code": "sh.605286",
+   "name": "同力天启",
+   "buy_px": 23.91,
+   "state": "SEALED_EOD",
+   "final_state": "SEALED_EOD",
+   "limit_px": 25.61,
+   "last_px": 25.61,
+   "winner": false,
+   "rocket": false,
+   "touched": true,
+   "touch_ts": "13:25",
+   "first_seal_ts": "13:25",
+   "seal_count": 1,
+   "break_count": 0,
+   "max_premium_pct": 7.11,
+   "max_drawdown_pct": -7.67,
+   "float_ret_pct": 7.11,
+   "transitions": [
+    {
+     "ts": "13:25",
+     "from": "SIGNALED",
+     "to": "SEALED"
+    },
+    {
+     "ts": "15:00",
+     "from": "SEALED",
+     "to": "SEALED_EOD"
+    }
+   ]
+  },
+  {
+   "code": "sh.600683",
+   "name": "京投发展",
+   "buy_px": 9.71,
+   "state": "SEALED_EOD",
+   "final_state": "SEALED_EOD",
+   "limit_px": 9.71,
+   "last_px": 9.71,
+   "winner": false,
+   "rocket": true,
+   "touched": true,
+   "touch_ts": "09:50",
+   "first_seal_ts": "09:50",
+   "seal_count": 1,
+   "break_count": 0,
+   "max_premium_pct": 0.0,
+   "max_drawdown_pct": 0.0,
+   "float_ret_pct": 0.0,
+   "transitions": [
+    {
+     "ts": "09:50",
+     "from": "SIGNALED",
+     "to": "SEALED"
+    },
+    {
+     "ts": "15:00",
+     "from": "SEALED",
+     "to": "SEALED_EOD"
+    }
+   ]
+  },
+  {
+   "code": "sh.600791",
+   "name": "京能置业",
+   "buy_px": 7.32,
+   "state": "NEVER_TOUCHED",
+   "final_state": "NEVER_TOUCHED",
+   "limit_px": 7.99,
+   "last_px": 7.49,
+   "winner": false,
+   "rocket": false,
+   "touched": false,
+   "touch_ts": null,
+   "first_seal_ts": null,
+   "seal_count": 0,
+   "break_count": 0,
+   "max_premium_pct": 6.28,
+   "max_drawdown_pct": -6.81,
+   "float_ret_pct": 2.32,
+   "transitions": [
+    {
+     "ts": "15:00",
+     "from": "SIGNALED",
+     "to": "NEVER_TOUCHED"
+    }
+   ]
+  },
+  {
+   "code": "sh.600984",
+   "name": "建设机械",
+   "buy_px": 4.28,
+   "state": "SEALED_EOD",
+   "final_state": "SEALED_EOD",
+   "limit_px": 4.49,
+   "last_px": 4.49,
+   "winner": false,
+   "rocket": false,
+   "touched": true,
+   "touch_ts": "09:50",
+   "first_seal_ts": "09:50",
+   "seal_count": 2,
+   "break_count": 1,
+   "max_premium_pct": 4.91,
+   "max_drawdown_pct": -4.45,
+   "float_ret_pct": 4.91,
+   "transitions": [
+    {
+     "ts": "09:50",
+     "from": "SIGNALED",
+     "to": "SEALED"
+    },
+    {
+     "ts": "09:55",
+     "from": "SEALED",
+     "to": "BROKEN"
+    },
+    {
+     "ts": "10:45",
+     "from": "BROKEN",
+     "to": "RE_SEALED"
+    },
+    {
+     "ts": "15:00",
+     "from": "RE_SEALED",
+     "to": "SEALED_EOD"
+    }
+   ]
+  },
+  {
+   "code": "sh.603878",
+   "name": "武进不锈",
+   "buy_px": 4.98,
+   "state": "NEVER_TOUCHED",
+   "final_state": "NEVER_TOUCHED",
+   "limit_px": 5.43,
+   "last_px": 5.1,
+   "winner": false,
+   "rocket": false,
+   "touched": false,
+   "touch_ts": null,
+   "first_seal_ts": null,
+   "seal_count": 0,
+   "break_count": 0,
+   "max_premium_pct": 7.03,
+   "max_drawdown_pct": -5.82,
+   "float_ret_pct": 2.41,
+   "transitions": [
+    {
+     "ts": "15:00",
+     "from": "SIGNALED",
+     "to": "NEVER_TOUCHED"
+    }
+   ]
+  },
+  {
+   "code": "sh.603882",
+   "name": "金域医学",
+   "buy_px": 30.88,
+   "state": "FADED",
+   "final_state": "FADED",
+   "limit_px": 31.87,
+   "last_px": 30.95,
+   "winner": false,
+   "rocket": false,
+   "touched": true,
+   "touch_ts": "09:50",
+   "first_seal_ts": "09:50",
+   "seal_count": 1,
+   "break_count": 1,
+   "max_premium_pct": 3.21,
+   "max_drawdown_pct": -3.77,
+   "float_ret_pct": 0.23,
+   "transitions": [
+    {
+     "ts": "09:50",
+     "from": "SIGNALED",
+     "to": "SEALED"
+    },
+    {
+     "ts": "13:20",
+     "from": "SEALED",
+     "to": "BROKEN"
+    },
+    {
+     "ts": "15:00",
+     "from": "BROKEN",
+     "to": "FADED"
+    }
+   ]
+  },
+  {
+   "code": "sh.603950",
+   "name": "长源东谷",
+   "buy_px": 62.2,
+   "state": "NEVER_TOUCHED",
+   "final_state": "NEVER_TOUCHED",
+   "limit_px": 64.46,
+   "last_px": 60.96,
+   "winner": false,
+   "rocket": false,
+   "touched": false,
+   "touch_ts": null,
+   "first_seal_ts": null,
+   "seal_count": 0,
+   "break_count": 0,
+   "max_premium_pct": 1.86,
+   "max_drawdown_pct": -5.67,
+   "float_ret_pct": -1.99,
+   "transitions": [
+    {
+     "ts": "15:00",
+     "from": "SIGNALED",
+     "to": "NEVER_TOUCHED"
+    }
+   ]
+  },
+  {
+   "code": "sh.605198",
+   "name": "安德利",
+   "buy_px": 69.96,
+   "state": "FADED",
+   "final_state": "FADED",
+   "limit_px": 71.29,
+   "last_px": 68.73,
+   "winner": true,
+   "rocket": false,
+   "touched": true,
+   "touch_ts": "09:50",
+   "first_seal_ts": "09:50",
+   "seal_count": 1,
+   "break_count": 1,
+   "max_premium_pct": 1.9,
+   "max_drawdown_pct": -7.0,
+   "float_ret_pct": -1.76,
+   "transitions": [
+    {
+     "ts": "09:50",
+     "from": "SIGNALED",
+     "to": "SEALED"
+    },
+    {
+     "ts": "13:20",
+     "from": "SEALED",
+     "to": "BROKEN"
+    },
+    {
+     "ts": "15:00",
+     "from": "BROKEN",
+     "to": "FADED"
+    }
+   ]
+  },
+  {
+   "code": "sh.605033",
+   "name": "美邦股份",
+   "buy_px": 19.33,
+   "state": "SEALED_EOD",
+   "final_state": "SEALED_EOD",
+   "limit_px": 19.6,
+   "last_px": 19.6,
+   "winner": true,
+   "rocket": false,
+   "touched": true,
+   "touch_ts": "09:50",
+   "first_seal_ts": "09:50",
+   "seal_count": 1,
+   "break_count": 0,
+   "max_premium_pct": 1.4,
+   "max_drawdown_pct": 0.0,
+   "float_ret_pct": 1.4,
+   "transitions": [
+    {
+     "ts": "09:50",
+     "from": "SIGNALED",
+     "to": "SEALED"
+    },
+    {
+     "ts": "15:00",
+     "from": "SEALED",
+     "to": "SEALED_EOD"
+    }
+   ]
+  },
+  {
+   "code": "sh.603797",
+   "name": "联泰环保",
+   "buy_px": 4.42,
+   "state": "SEALED_EOD",
+   "final_state": "SEALED_EOD",
+   "limit_px": 4.59,
+   "last_px": 4.59,
+   "winner": false,
+   "rocket": false,
+   "touched": true,
+   "touch_ts": "09:50",
+   "first_seal_ts": "09:50",
+   "seal_count": 2,
+   "break_count": 1,
+   "max_premium_pct": 3.85,
+   "max_drawdown_pct": -2.18,
+   "float_ret_pct": 3.85,
+   "transitions": [
+    {
+     "ts": "09:50",
+     "from": "SIGNALED",
+     "to": "SEALED"
+    },
+    {
+     "ts": "09:55",
+     "from": "SEALED",
+     "to": "BROKEN"
+    },
+    {
+     "ts": "10:20",
+     "from": "BROKEN",
+     "to": "RE_SEALED"
+    },
+    {
+     "ts": "15:00",
+     "from": "RE_SEALED",
+     "to": "SEALED_EOD"
+    }
+   ]
+  },
+  {
+   "code": "sh.605162",
+   "name": "新中港",
+   "buy_px": 9.17,
+   "state": "SEALED_EOD",
+   "final_state": "SEALED_EOD",
+   "limit_px": 9.33,
+   "last_px": 9.33,
+   "winner": false,
+   "rocket": false,
+   "touched": true,
+   "touch_ts": "09:50",
+   "first_seal_ts": "09:50",
+   "seal_count": 1,
+   "break_count": 0,
+   "max_premium_pct": 1.74,
+   "max_drawdown_pct": 0.0,
+   "float_ret_pct": 1.74,
+   "transitions": [
+    {
+     "ts": "09:50",
+     "from": "SIGNALED",
+     "to": "SEALED"
+    },
+    {
+     "ts": "15:00",
+     "from": "SEALED",
+     "to": "SEALED_EOD"
+    }
+   ]
+  },
+  {
+   "code": "sh.601121",
+   "name": "宝地矿业",
+   "buy_px": 7.5,
+   "state": "NEVER_TOUCHED",
+   "final_state": "NEVER_TOUCHED",
+   "limit_px": 7.78,
+   "last_px": 7.36,
+   "winner": false,
+   "rocket": false,
+   "touched": false,
+   "touch_ts": null,
+   "first_seal_ts": null,
+   "seal_count": 0,
+   "break_count": 0,
+   "max_premium_pct": 1.6,
+   "max_drawdown_pct": -4.33,
+   "float_ret_pct": -1.87,
+   "transitions": [
+    {
+     "ts": "15:00",
+     "from": "SIGNALED",
+     "to": "NEVER_TOUCHED"
+    }
+   ]
+  },
+  {
+   "code": "sh.603038",
+   "name": "华立股份",
+   "buy_px": 14.52,
+   "state": "SEALED_EOD",
+   "final_state": "SEALED_EOD",
+   "limit_px": 15.06,
+   "last_px": 15.06,
+   "winner": true,
+   "rocket": false,
+   "touched": true,
+   "touch_ts": "09:55",
+   "first_seal_ts": "09:55",
+   "seal_count": 1,
+   "break_count": 0,
+   "max_premium_pct": 3.72,
+   "max_drawdown_pct": -0.27,
+   "float_ret_pct": 3.72,
+   "transitions": [
+    {
+     "ts": "09:55",
+     "from": "SIGNALED",
+     "to": "SEALED"
+    },
+    {
+     "ts": "15:00",
+     "from": "SEALED",
+     "to": "SEALED_EOD"
+    }
+   ]
+  }
+ ],
+ "req_count": 45
+}

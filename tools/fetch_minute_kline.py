@@ -1,0 +1,639 @@
+#!/usr/bin/env python3
+"""fetch_minute_kline.py - 按需回补5分钟K线到独立库 data/minute.db (Task #23)
+
+设计定案(Task #21调研报告 data/realtime/RESEARCH_MINUTE_KLINE_FEASIBILITY.md):
+- 独立库 minute.db, 表 minute_kline PK(code,date,time) WITHOUT ROWID, WAL
+- 按需回补(交易明细驱动), 绝不做全市场全深度(磁盘余量仅5.4G)
+- BaoStock frequency='5' 2020年起可用, 48bar/日, time字段bar结束时刻
+- Task #10教训固化: 拉取失败必须重试+计数+告警+非0退出码, 禁止静默跳过
+
+用法:
+  自动白名单: python3 tools/fetch_minute_kline.py --whitelist-from-trades [--dry-run]
+  手动指定:   python3 tools/fetch_minute_kline.py --codes sh.600000,sz.000001 \
+                  --dates 2024-01-01:2024-06-30
+  盘后增量:   python3 tools/fetch_minute_kline.py --daily 2026-07-24
+              (当日持仓股+候选股; BaoStock为主, ifzq mkline m5备份源)
+"""
+import argparse
+import glob
+import json
+import logging
+import os
+import random
+import sqlite3
+import sys
+import time
+import urllib.request
+from datetime import datetime, timedelta
+
+import baostock as bs
+
+MINUTE_DB = '/home/AIWealth/data/minute.db'
+STOCKS_DB = '/home/AIWealth/data/stocks.db'
+PROGRESS_FILE = '/home/AIWealth/data/minute_fetch_progress.json'
+LOG_FILE = '/home/AIWealth/logs/fetch_minute_kline.log'
+ALERT_FILE = '/home/AIWealth/logs/realtime/scheduler_alerts.log'
+TRADES_GLOB = '/home/AIWealth/logs/backtest/*trades*.json'
+POSITIONS_FILE = '/home/AIWealth/data/realtime/positions.json'
+CANDIDATES_DIR = '/home/AIWealth/data/realtime'
+
+MIN_START = '2020-01-01'   # Leader实测2026-07-24: BaoStock 5分钟线2019返回0条
+BARS_PER_DAY = 48          # Leader实测: 48bar/日
+COMMIT_BATCH = 50          # 每50个请求commit一次(短事务)
+RETRIES = 3
+
+# ============ [Task #31] BaoStock限速纪律(2026-07-24封禁事故固化) ============
+# 事故: t25事件宇宙回补以3.2req/s持续拉取32738股·日, 触发BaoStock黑名单
+# (login 10001011 "黑名单用户"), 当晚全部BaoStock链路瘫痪。三条铁律:
+# 1. 请求间隔≥0.5s(≤2req/s), 任何BaoStock批量拉取不得移除此限速
+# 2. 连续错误/登录失败立即终止+告警, 禁止重试轰炸(重试会加重封禁判定)
+# 3. 大批量任务默认分日执行, 单日请求数≤2万(MAX_REQUESTS_PER_RUN硬闸)
+BAOSTOCK_MIN_INTERVAL = 0.5        # 秒/请求, 铁律1
+MAX_CONSECUTIVE_ERRORS = 5         # 连续错误熔断阈值, 铁律2
+MAX_REQUESTS_PER_RUN = 20000       # 单次运行请求数硬闸, 铁律3
+# ============ [Task#194] 2026-08-05二次封禁事故追加纪律 ============
+# 事故: 8/5 17:10解禁后立即全量回补(87min高强度)→18:31再封。
+# ④分批限速: 每批BATCH_SIZE个请求, 批间sleep 30s+0-10s随机抖动
+# ⑤熔断升级: 任何请求再遇10001011 → 立即停止+ban_status写re_banned事件
+BATCH_SIZE = 50                    # 每批请求数
+# ============ [Task#201] 2026-08-06 用户要求请求节奏进一步放保守 ============
+# (历史: 单请求1.5s+0~0.3s, 批间60s+0~15s — t259已按用户裁决放开)
+# ============ [Task#259] 2026-08-10 用户裁决放开保守限速 ============
+# BaoStock官方规则: 日上限5万次+禁并发, 无QPS限制; 用户按日4万次预算执行
+# (统一预算模块baostock_budget拦截), 单请求/批间对齐t233已验证参数
+REQUEST_INTERVAL = 0.5             # 秒/请求(t259: 1.5→0.5, 对齐t233)
+REQUEST_JITTER = 0.2               # 单只请求间隔附加随机抖动上限(t259: 原0.3)
+BATCH_SLEEP_BASE = 15              # 批间基础sleep秒数(t259: 原60)
+BATCH_SLEEP_JITTER = 5             # 批间随机抖动上限秒数(t259: 原15)
+BAN_STATUS_FILE = '/home/AIWealth/data/baostock_ban_status.json'
+# ============ [Task#259] BaoStock统一日预算埋点(4万次/日用户红线) ============
+# --daily盘后增量属日更链priority='p0', 其余回补模式为'batch';
+# 预算耗尽 → 写日志+告警+优雅收工(commit保留进度)退出码4。
+# 模块自身异常fail-open放行(另有10001011熔断/硬闸充当保险)。
+_BUDGET_PRIORITY = 'batch'         # main中--daily模式改写为'p0'
+try:
+    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+    import baostock_budget as _bb
+except Exception:
+    _bb = None
+
+
+def budget_acquire_ok(n=1):
+    """[Task#259] 请求前统一预算申请: 返回True=放行/False=额度耗尽;
+    预算模块自身异常fail-open返回True。"""
+    if _bb is None:
+        return True
+    try:
+        return _bb.acquire(n, _BUDGET_PRIORITY)
+    except Exception as e:
+        logger.warning("[Task#259] 预算模块异常(fail-open放行): %s", e)
+        return True
+# ============================================================================
+
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s [%(levelname)s] %(message)s',
+    handlers=[logging.FileHandler(LOG_FILE, encoding='utf-8'),
+              logging.StreamHandler()])
+logger = logging.getLogger(__name__)
+
+# ============ [Task#273] baostock socket死连接自旋守护(源自Task#270) ============
+# 官方库socketutil.send_msg的while True: recv(8192)在对端关闭连接后recv持续
+# 返回b''不抛异常 → 无sleep用户态死循环(8/10 t233停摆2.4h/91%CPU实证)。
+# monkey-patch守护版(空recv返回None走库原生10002007"网络接收错误"路径 +
+# socket 120s超时兜底), 须在bs.login()前生效 — 模块导入期即install。
+# 根因与验证详见 research/results/t270_ops_incident/REPORT.md。
+# 导入失败fail-open不阻断回补链(与_bb同款容错, 仅失去防自旋守护, 记警告)。
+try:
+    import baostock_socket_guard as _bsg
+    _bsg.install()
+except Exception as _e:
+    logger.warning("[Task#273] socket守护安装失败(fail-open, 无防自旋保护): %s",
+                   _e)
+    _bsg = None
+
+SCHEMA = """
+CREATE TABLE IF NOT EXISTS minute_kline (
+    code    TEXT NOT NULL,
+    date    TEXT NOT NULL,          -- 'YYYY-MM-DD'
+    time    TEXT NOT NULL,          -- 'HHMM' bar结束时刻(0935..1500)
+    open    REAL, high REAL, low REAL, close REAL,
+    volume  INTEGER,                -- 单位: 股
+    PRIMARY KEY (code, date, time)
+) WITHOUT ROWID;
+"""
+
+
+def ensure_db():
+    conn = sqlite3.connect(MINUTE_DB)
+    conn.execute("PRAGMA journal_mode=WAL")
+    conn.execute("PRAGMA synchronous=NORMAL")
+    conn.execute(SCHEMA)
+    conn.commit()
+    return conn
+
+
+def write_re_banned_event(note):
+    """[Task#194] 回补中途再封禁 → ban_status写re_banned事件(append到
+    history数组, 字段风格与既有事件一致)+recovered翻回false。
+    仅在recovered/pending态时写(避免封禁期每日跑任务重复刷事件)。"""
+    ts = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+    try:
+        with open(BAN_STATUS_FILE, encoding='utf-8') as f:
+            ban = json.load(f)
+    except Exception:
+        ban = {}
+    if not ban.get('recovered') and not ban.get('pending_confirm'):
+        return
+    ban['recovered'] = False
+    ban['pending_confirm'] = False
+    ban.setdefault('history', []).append({
+        'event': 're_banned', 'detected_at': ts,
+        'note': f'{note} (fetch_minute_kline熔断自动写入, Task#194)'})
+    try:
+        with open(BAN_STATUS_FILE, 'w', encoding='utf-8') as f:
+            json.dump(ban, f, ensure_ascii=False, indent=2)
+    except Exception as e:
+        logger.error("re_banned事件写入失败: %s", e)
+
+
+# ---------------------------------------------------------------------------
+# 白名单构建
+# ---------------------------------------------------------------------------
+def _shift_day(date_str, days):
+    return (datetime.strptime(date_str, '%Y-%m-%d')
+            + timedelta(days=days)).strftime('%Y-%m-%d')
+
+
+def _merge_intervals(intervals):
+    """[(start,end)] 按code无关合并重叠/相邻(<=2天间隙)区间, 减少请求数。"""
+    if not intervals:
+        return []
+    intervals = sorted(intervals)
+    merged = [list(intervals[0])]
+    for s, e in intervals[1:]:
+        if s <= _shift_day(merged[-1][1], 2):   # 间隙<=2天视为相邻
+            if e > merged[-1][1]:
+                merged[-1][1] = e
+        else:
+            merged.append([s, e])
+    return [tuple(x) for x in merged]
+
+
+def build_whitelist_from_trades():
+    """扫描回测trades json + 实盘positions.json, 返回 {code: [(start,end)...]}。
+    区间 = 持有期±1日历日, 起点不早于MIN_START。"""
+    by_code = {}
+
+    def add(code, start, end):
+        if not code or not start:
+            return
+        end = end or start
+        s = max(_shift_day(start, -1), MIN_START)
+        e = _shift_day(end, 1)
+        if e < MIN_START:
+            return
+        by_code.setdefault(code, []).append((s, e))
+
+    n_files, n_trades = 0, 0
+    for f in sorted(glob.glob(TRADES_GLOB)):
+        try:
+            d = json.load(open(f))
+        except Exception as exc:
+            logger.warning("跳过无法解析的trades文件 %s: %s", f, exc)
+            continue
+        trades = d.get('trades') if isinstance(d, dict) else d
+        if not isinstance(trades, list):
+            continue
+        n_files += 1
+        for t in trades:
+            if not isinstance(t, dict):
+                continue
+            add(t.get('code'), t.get('buy_date'),
+                t.get('sell_date') or t.get('expire_date'))
+            n_trades += 1
+
+    # 实盘: 已平仓 + 在持(在持用expire_date作区间尾)
+    try:
+        pd_ = json.load(open(POSITIONS_FILE))
+        for t in pd_.get('closed_trades', []):
+            add(t.get('code'), t.get('buy_date'),
+                t.get('sell_date') or t.get('expire_date'))
+            n_trades += 1
+        for p in pd_.get('positions', []):
+            if p.get('status') == 'holding':
+                add(p.get('code'), p.get('buy_date'), p.get('expire_date'))
+                n_trades += 1
+    except Exception as exc:
+        logger.warning("positions.json读取失败(不阻断): %s", exc)
+
+    merged = {c: _merge_intervals(v) for c, v in by_code.items()}
+    n_req = sum(len(v) for v in merged.values())
+    logger.info("白名单: %d个trades文件+实盘, %d笔交易 → %d只股 / %d个合并区间",
+                n_files, n_trades, len(merged), n_req)
+    return merged
+
+
+def build_whitelist_daily(date_str):
+    """盘后增量: 当日持仓股(含当日平仓) + 当日候选股, 区间=当日。"""
+    codes = set()
+    try:
+        pd_ = json.load(open(POSITIONS_FILE))
+        for p in pd_.get('positions', []):
+            if p.get('status') == 'holding':
+                codes.add(p['code'])
+        for t in pd_.get('closed_trades', []):
+            if t.get('sell_date') == date_str or t.get('buy_date') == date_str:
+                codes.add(t['code'])
+    except Exception as exc:
+        logger.warning("positions.json读取失败: %s", exc)
+    cand_file = os.path.join(
+        CANDIDATES_DIR, f"candidates_{date_str.replace('-', '')}.json")
+    if os.path.exists(cand_file):
+        try:
+            d = json.load(open(cand_file))
+            for k, v in d.items():
+                if isinstance(v, list):
+                    for item in v:
+                        if isinstance(item, dict) and item.get('code'):
+                            codes.add(item['code'])
+        except Exception as exc:
+            logger.warning("candidates文件解析失败: %s", exc)
+    else:
+        logger.warning("候选文件不存在: %s", cand_file)
+    logger.info("盘后增量白名单(%s): %d只股", date_str, len(codes))
+    return {c: [(date_str, date_str)] for c in sorted(codes)}
+
+
+# ---------------------------------------------------------------------------
+# 完整性 / 断点续传
+# ---------------------------------------------------------------------------
+def expected_trading_dates(stocks_conn, code, start, end):
+    """该股在区间内的实际交易日(以stock_kline有当日行为准, 自动跳过停牌/节假日)。"""
+    cur = stocks_conn.execute(
+        "SELECT date FROM stock_kline WHERE code=? AND date>=? AND date<=? "
+        "ORDER BY date", (code, start, end))
+    return [r[0] for r in cur.fetchall()]
+
+
+def existing_bar_counts(min_conn, code, start, end):
+    cur = min_conn.execute(
+        "SELECT date, COUNT(*) FROM minute_kline "
+        "WHERE code=? AND date>=? AND date<=? GROUP BY date",
+        (code, start, end))
+    return dict(cur.fetchall())
+
+
+# ---------------------------------------------------------------------------
+# 数据源
+# ---------------------------------------------------------------------------
+def fetch_baostock_5min(code, start, end):
+    """返回 rows [(code,date,hhmm,o,h,l,c,vol)], 失败抛异常, 空返回[]。"""
+    rs = bs.query_history_k_data_plus(
+        code, 'date,time,code,open,high,low,close,volume',
+        start_date=start, end_date=end, frequency='5', adjustflag='3')
+    if rs.error_code != '0':
+        raise RuntimeError(f"error_code={rs.error_code} {rs.error_msg}")
+    rows = []
+    while rs.next():
+        r = rs.get_row_data()
+        try:
+            rows.append((r[2], r[0], r[1][8:12],
+                         float(r[3]), float(r[4]), float(r[5]), float(r[6]),
+                         int(float(r[7])) if r[7] else None))
+        except (ValueError, IndexError):
+            continue
+    return rows
+
+
+def fetch_ifzq_m5(code, date_str):
+    """备份源(仅当日/近数日): ifzq mkline m5, 深度~6.7交易日(Task#21实测320根)。
+    字段序 [time,open,close,high,low,volume(手)], 时间戳为bar结束时刻。"""
+    qt_code = code.replace('sh.', 'sh').replace('sz.', 'sz')
+    url = (f'https://ifzq.gtimg.cn/appstock/app/kline/mkline'
+           f'?param={qt_code},m5,,320')
+    req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0'})
+    with urllib.request.urlopen(req, timeout=10) as resp:
+        data = json.loads(resp.read().decode('utf-8', errors='replace'))
+    bars = data.get('data', {}).get(qt_code, {}).get('m5', [])
+    ymd = date_str.replace('-', '')
+    rows = []
+    for b in bars:
+        ts = str(b[0])
+        if ts[:8] != ymd:
+            continue
+        rows.append((code, date_str, ts[8:12],
+                     float(b[1]), float(b[3]), float(b[4]), float(b[2]),
+                     int(float(b[5]) * 100)))   # 手→股, 与BaoStock单位一致
+    return rows
+
+
+# ---------------------------------------------------------------------------
+# 主回补流程
+# ---------------------------------------------------------------------------
+def update_progress(progress):
+    try:
+        with open(PROGRESS_FILE, 'w') as f:
+            json.dump(progress, f, ensure_ascii=False, indent=2)
+    except Exception:
+        pass
+
+
+def run_backfill(whitelist, dry_run=False, use_ifzq_fallback=False):
+    stocks_conn = sqlite3.connect(f'file:{STOCKS_DB}?mode=ro', uri=True)
+    min_conn = ensure_db()
+
+    # 预扫: 计算每个区间的缺失交易日(断点续传: 已有>=48bar的股·日跳过)
+    tasks = []          # (code, req_start, req_end, missing_dates)
+    total_days, missing_days = 0, 0
+    for code, intervals in sorted(whitelist.items()):
+        for start, end in intervals:
+            exp = expected_trading_dates(stocks_conn, code, start, end)
+            if not exp:
+                continue
+            total_days += len(exp)
+            have = existing_bar_counts(min_conn, code, start, end)
+            missing = [d for d in exp if have.get(d, 0) < BARS_PER_DAY]
+            if missing:
+                missing_days += len(missing)
+                tasks.append((code, missing[0], missing[-1], set(missing)))
+
+    logger.info("预扫: 待回补%d个股·日(全量%d, 已完整跳过%d), 请求数%d",
+                missing_days, total_days, total_days - missing_days,
+                len(tasks))
+    est_gb = missing_days * BARS_PER_DAY * 67.7 / 1e9  # Task#21实测67.7B/行
+    logger.info("体量预估: %.3f GB (67.7B/行×48bar, Task#21实测系数)", est_gb)
+    if dry_run:
+        logger.info("[dry-run] 仅预扫, 不拉取")
+        return 0
+    if est_gb > 0.5:
+        logger.error("预估体量%.2fGB超过0.5GB预算, 中止! 请缩小白名单", est_gb)
+        return 2
+
+    # [Task #31] 铁律3: 单次运行请求数硬闸(大批量任务必须分日/分批执行)
+    if len(tasks) > MAX_REQUESTS_PER_RUN:
+        logger.error("请求数%d超过单次上限%d(2026-07-24封禁事故铁律), 中止! "
+                     "请用--codes/--dates分批执行", len(tasks),
+                     MAX_REQUESTS_PER_RUN)
+        _write_alert(f"[MINUTE_KLINE] 请求数{len(tasks)}超单次上限"
+                     f"{MAX_REQUESTS_PER_RUN}, 已拒绝执行")
+        return 2
+
+    # [Task#259] login也计1次预算; 额度耗尽则本轮不启动(优雅顺延, 次日账本重置后续)
+    if not budget_acquire_ok(1):
+        logger.error("[Task#259] BaoStock统一日预算耗尽, 本次回补不启动(退出码4)")
+        _write_alert("[MINUTE_KLINE] [Task#259] 日预算耗尽, 回补优雅顺延")
+        return 4
+    lg = bs.login()
+    if lg.error_code != '0':
+        # [Task #31] 铁律2: 登录失败立即终止+告警, 禁止重试(封禁期重试加重判定)
+        logger.error("BaoStock登录失败: %s (若为10001011黑名单, 系封禁未解除)",
+                     lg.error_msg)
+        _write_alert(f"[MINUTE_KLINE] BaoStock登录失败: {lg.error_msg}")
+        # [Task#194] 登录即遇黑名单且当前状态为已恢复 → 写re_banned事件
+        if '10001011' in str(lg.error_code) + str(lg.error_msg) \
+                or '黑名单' in str(lg.error_msg):
+            write_re_banned_event(f'login再遇10001011: {lg.error_msg}')
+        return 2
+
+    inserted, done_days = 0, 0
+    failures = []       # 3次重试仍失败的(code,start,end,err)
+    incomplete = []     # 有数据但<48bar的(code,date,count)
+    suspended = []      # 0根bar且stock_kline当日volume=0/NULL → 疑似停牌日(info级)
+    consecutive_errors = 0  # [Task #31] 铁律2熔断计数
+    t0 = time.time()
+
+    def _is_suspended_day(code, d):
+        """告警分级用: stock_kline当日volume=0/NULL视为疑似停牌(无分钟线属正常)。
+        注: 仅影响告警级别, 不过滤预期交易日(尊重expected_trading_dates口径)。"""
+        r = stocks_conn.execute(
+            "SELECT volume FROM stock_kline WHERE code=? AND date=?",
+            (code, d)).fetchone()
+        return r is not None and not r[0]
+
+    progress = {'total_requests': len(tasks), 'completed': 0,
+                'inserted': 0, 'failures': 0,
+                'started_at': datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
+    update_progress(progress)
+
+    for i, (code, start, end, missing) in enumerate(tasks):
+        rows, err = [], None
+        budget_denied = False   # [Task#259]
+        for attempt in range(RETRIES):
+            _t_req = time.time()
+            # [Task#259] 每次真实请求前申请1次额度; 耗尽则优雅收工
+            if not budget_acquire_ok(1):
+                budget_denied = True
+                break
+            try:
+                rows = fetch_baostock_5min(code, start, end)
+            except Exception as exc:
+                err = str(exc)
+                rows = []
+            # [Task #31]铁律1/[t259]: 请求间隔REQUEST_INTERVAL+抖动(t259提速0.5s)
+            _gap = (REQUEST_INTERVAL + random.uniform(0, REQUEST_JITTER)
+                    - (time.time() - _t_req))
+            if _gap > 0:
+                time.sleep(_gap)
+            if rows:
+                err = None
+                break
+            if err and ('10001011' in err or '黑名单' in err):
+                break   # [Task #31] 铁律2: 封禁错误不重试(重试轰炸加重判定)
+            if err and ('10002007' in err or '网络接收错误' in err):
+                # [Task#273→#270] 网络接收错误=连接已死(守护版send_msg防自旋
+                # 返回此码), 原socket重试无意义 → logout+re-login重建连接后
+                # 再重试(login内部SocketUtil().connect()重建, t270已验证)
+                logger.warning("[Task#273] %s 疑死连接(%s), re-login重建socket",
+                               code, err)
+                try:
+                    bs.logout()
+                except Exception:
+                    pass
+                time.sleep(3)
+                lg2 = bs.login()
+                if lg2.error_code != '0':
+                    err = (f"t273死连接re-login失败: {lg2.error_code} "
+                           f"{lg2.error_msg}")
+                    break   # 交下游既有黑名单熔断/连续错误计数处理
+                continue
+            time.sleep(1 + attempt)
+        # [Task#259] 预算耗尽 → commit保留进度优雅收工(断点续传次日续), 退出码4
+        if budget_denied:
+            logger.error("⛔ [Task#259] BaoStock日预算耗尽, 优雅收工"
+                         "(已完成%d/%d请求, 断点续传次日续), 退出码4", i, len(tasks))
+            _write_alert(f"[MINUTE_KLINE] [Task#259] 日预算耗尽优雅收工"
+                         f"({i}/{len(tasks)}请求)")
+            progress.update(completed=i, inserted=inserted,
+                            failures=len(failures),
+                            budget_capped_at=datetime.now().strftime(
+                                '%Y-%m-%d %H:%M:%S'))
+            update_progress(progress)
+            min_conn.commit()
+            min_conn.close()
+            bs.logout()
+            return 4
+        # [Task#194] 铁律5: 再遇10001011 → 立即熔断写re_banned事件并退出
+        if err and ('10001011' in err or '黑名单' in err):
+            logger.error("⛔ %s %s~%s 命中黑名单错误(%s), 再封禁熔断立即停止! "
+                         "(Task#194: 禁止继续轰炸加重封禁判定)",
+                         code, start, end, err)
+            write_re_banned_event(f'回补中途{code}再遇10001011: {err}')
+            _write_alert(f"[MINUTE_KLINE] ⛔再封禁熔断: {code} {err}")
+            min_conn.commit()
+            min_conn.close()
+            bs.logout()
+            return 3
+        # [Task #31] 铁律2: 连续异常熔断(区别于停牌空结果, 仅计exception)
+        if err:
+            consecutive_errors += 1
+            if consecutive_errors >= MAX_CONSECUTIVE_ERRORS:
+                logger.error("连续%d个请求异常(最后: %s), 熔断终止! "
+                             "禁止继续轰炸数据源", consecutive_errors, err)
+                _write_alert(f"[MINUTE_KLINE] 连续{consecutive_errors}次请求"
+                             f"异常熔断: {err}")
+                failures.append((code, start, end, err))
+                break
+        else:
+            consecutive_errors = 0
+        if not rows and use_ifzq_fallback and start == end:
+            try:
+                rows = fetch_ifzq_m5(code, start)
+                if rows:
+                    logger.info("%s %s: BaoStock空, ifzq备份源命中%d根",
+                                code, start, len(rows))
+                    err = None
+            except Exception as exc:
+                err = f"ifzq fallback也失败: {exc}"
+        if not rows:
+            # 全部缺失日均疑似停牌 → 属正常空结果, 降级info(不计失败不告警)
+            if all(_is_suspended_day(code, d) for d in missing):
+                suspended.extend((code, d, 0) for d in sorted(missing))
+                logger.info("[SUSPENDED?] %s %s~%s: 无分钟线, "
+                            "stock_kline当日volume=0/NULL, 疑似停牌日, 跳过",
+                            code, start, end)
+                continue
+            # Task#10教训: 禁止静默跳过 — 计数+告警+失败清单
+            failures.append((code, start, end, err or 'empty after retries'))
+            logger.warning("[FETCH_FAIL] %s %s~%s: %s",
+                           code, start, end, err or '3次重试仍为空')
+            continue
+
+        day_counts = {}
+        for r in rows:
+            if r[1] in missing:     # 只写缺失日(已完整日不重写)
+                min_conn.execute(
+                    "INSERT OR IGNORE INTO minute_kline VALUES (?,?,?,?,?,?,?,?)",
+                    r)
+                inserted += 1
+            day_counts[r[1]] = day_counts.get(r[1], 0) + 1
+        for d in sorted(missing):
+            c = day_counts.get(d, 0)
+            if c >= BARS_PER_DAY:
+                done_days += 1
+            elif c == 0 and _is_suspended_day(code, d):
+                suspended.append((code, d, 0))
+            else:
+                incomplete.append((code, d, c))
+        min_conn.commit()
+
+        if (i + 1) % COMMIT_BATCH == 0 or i + 1 == len(tasks):
+            elapsed = time.time() - t0
+            speed = (i + 1) / elapsed if elapsed else 0
+            progress.update(completed=i + 1, inserted=inserted,
+                            failures=len(failures),
+                            speed=f"{speed:.1f} req/s",
+                            eta_minutes=round(
+                                (len(tasks) - i - 1) / speed / 60, 1)
+                            if speed else None)
+            update_progress(progress)
+            logger.info("进度 %d/%d, 插入%d行, 失败%d, %.1f req/s",
+                        i + 1, len(tasks), inserted, len(failures), speed)
+
+        # [Task#194]铁律4/[Task#201]: 分批限速 — 每批BATCH_SIZE个请求, 批间60s+抖动
+        if (i + 1) % BATCH_SIZE == 0 and i + 1 < len(tasks):
+            _pause = BATCH_SLEEP_BASE + random.uniform(0, BATCH_SLEEP_JITTER)
+            logger.info("[Task#194分批] 第%d批(%d个请求)完成, 批间休眠%.1fs",
+                        (i + 1) // BATCH_SIZE, BATCH_SIZE, _pause)
+            time.sleep(_pause)
+
+    bs.logout()
+    min_conn.commit()
+    db_size = os.path.getsize(MINUTE_DB)
+    elapsed = time.time() - t0
+    progress.update(finished_at=datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+                    elapsed_minutes=round(elapsed / 60, 1),
+                    db_size_mb=round(db_size / 1e6, 1))
+    update_progress(progress)
+
+    logger.info("=" * 60)
+    logger.info("回补完成: 插入%d行 | 完整股·日%d | 疑似停牌股·日%d | "
+                "不足48bar股·日%d | 失败请求%d | 耗时%.1f分钟 | minute.db=%.1fMB",
+                inserted, done_days, len(suspended), len(incomplete),
+                len(failures), elapsed / 60, db_size / 1e6)
+    if suspended:
+        logger.info("[SUSPENDED?] 疑似停牌股·日%d个(stock_kline当日volume=0/NULL, "
+                    "无分钟线属正常, 前10条): %s", len(suspended), suspended[:10])
+    if incomplete:
+        logger.warning("[INCOMPLETE] 不足48bar的股·日(前20条, 注: 若该日实际为"
+                       "停牌/临停半日等特殊情形也可能出现, 请结合stock_kline核对): %s",
+                       incomplete[:20])
+    if failures:
+        logger.error("[FETCH_FAIL] 失败清单(%d条): %s", len(failures),
+                     failures[:50])
+        _write_alert(f"[MINUTE_KLINE] 回补失败{len(failures)}个请求, "
+                     f"详见 {LOG_FILE}")
+        min_conn.close()
+        return 1
+    min_conn.close()
+    return 0
+
+
+def _write_alert(msg):
+    try:
+        os.makedirs(os.path.dirname(ALERT_FILE), exist_ok=True)
+        with open(ALERT_FILE, 'a') as f:
+            f.write(f"{datetime.now().strftime('%Y-%m-%d %H:%M:%S')} "
+                    f"[DATA_INTEGRITY] {msg}\n")
+    except Exception:
+        pass
+
+
+# ---------------------------------------------------------------------------
+def main():
+    ap = argparse.ArgumentParser(description='按需回补5分钟K线到minute.db')
+    ap.add_argument('--whitelist-from-trades', action='store_true',
+                    help='自动模式: 扫描回测trades json+实盘平仓记录')
+    ap.add_argument('--codes', help='逗号分隔, 如 sh.600000,sz.000001')
+    ap.add_argument('--dates', help='区间 2024-01-01:2024-06-30 或单日')
+    ap.add_argument('--daily', metavar='DATE',
+                    help='盘后增量模式: 当日持仓+候选股(含ifzq备份源)')
+    ap.add_argument('--dry-run', action='store_true',
+                    help='仅预扫统计量级, 不实际拉取')
+    args = ap.parse_args()
+
+    if args.daily:
+        # [Task#259] 盘后增量属日更链, 预算按p0口径(仅受40000硬停拦截)
+        global _BUDGET_PRIORITY
+        _BUDGET_PRIORITY = 'p0'
+        whitelist = build_whitelist_daily(args.daily)
+        if not whitelist:
+            logger.info("盘后增量: 白名单为空, 无事可做")
+            return 0
+        return run_backfill(whitelist, dry_run=args.dry_run,
+                            use_ifzq_fallback=True)
+    if args.whitelist_from_trades:
+        whitelist = build_whitelist_from_trades()
+        return run_backfill(whitelist, dry_run=args.dry_run)
+    if args.codes and args.dates:
+        parts = args.dates.split(':')
+        start, end = parts[0], parts[-1]
+        whitelist = {c.strip(): [(max(start, MIN_START), end)]
+                     for c in args.codes.split(',') if c.strip()}
+        return run_backfill(whitelist, dry_run=args.dry_run)
+    ap.print_help()
+    return 2
+
+
+if __name__ == '__main__':
+    sys.exit(main())

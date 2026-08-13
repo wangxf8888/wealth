@@ -1,0 +1,101 @@
+{
+ "tag": "gate",
+ "gate": "P70_w0.3(131d)",
+ "s5_exit": "prod(d2h1_close)",
+ "ice_spec": "ice35:0.3:repair_exempt",
+ "dd_boost": "15:1.5(native)",
+ "start": "2021-01-01",
+ "end": "2026-07-01",
+ "strategies": [
+  "big_yang_low_open_v2",
+  "firstboard_low_open_dip_v2",
+  "gem_star_late_seal",
+  "amplitude_reversal",
+  "two_board_pullback_dip_h1c"
+ ],
+ "summary": {
+  "start_date": "2021-01-01",
+  "end_date": "2026-07-01",
+  "initial_capital": 1000000.0,
+  "final_nav": 250788795.16,
+  "total_return_pct": 24978.88,
+  "cagr_pct": 175.74,
+  "max_drawdown_pct": 20.25,
+  "n_trades": 2892,
+  "win_rate_pct": 51.07,
+  "avg_profit_pct": 1.03,
+  "avg_hold_hours": 6.47,
+  "per_strategy": {
+   "firstboard_low_open_dip_v2": {
+    "n_trades": 247,
+    "win_rate_pct": 62.75,
+    "avg_profit_pct": 1.69
+   },
+   "amplitude_reversal": {
+    "n_trades": 502,
+    "win_rate_pct": 55.18,
+    "avg_profit_pct": 1.07
+   },
+   "two_board_pullback_dip_h1c": {
+    "n_trades": 1156,
+    "win_rate_pct": 47.92,
+    "avg_profit_pct": 0.81
+   },
+   "big_yang_low_open_v2": {
+    "n_trades": 535,
+    "win_rate_pct": 49.35,
+    "avg_profit_pct": 0.9
+   },
+   "gem_star_late_seal": {
+    "n_trades": 452,
+    "win_rate_pct": 50.22,
+    "avg_profit_pct": 1.32
+   }
+  },
+  "yearly_returns": {
+   "2021": 217.5,
+   "2022": 123.1,
+   "2023": 122.54,
+   "2024": 119.71,
+   "2025": 375.29,
+   "2026": 52.79
+  },
+  "calmar": 8.68
+ },
+ "audit": {
+  "cash_min": 30.336080053821206,
+  "max_cost_over_nav": 0.2999985082205778,
+  "n_partial": 78,
+  "n_buys": 2895,
+  "t0_sell_blocked": 0,
+  "price_clamped": 0,
+  "cash_ge0_all": true,
+  "single_pos_le_cap": true,
+  "gate_day_cap_ok": true,
+  "n_gate_day_buys": 292,
+  "t1_violations": 0,
+  "s5_trades": 1156,
+  "s5_reasons": {
+   "expired": 1156
+  },
+  "priority_chain": {
+   "ice_reduce": 275,
+   "gate_eff": 120,
+   "ice_exempt": 14,
+   "boost": 62,
+   "plain": 858,
+   "gate_boost_suppressed": 0
+  },
+  "priority_violations": 0
+ },
+ "overlay_days": {
+  "n_gate_eff": 120,
+  "n_gate_ice_overlap": 11,
+  "n_ice_scaled": 275,
+  "n_ice_exempt": 14,
+  "n_boost_eff": 62,
+  "n_boost_wanted": 127,
+  "n_boost_ice_suppressed": 53
+ },
+ "elapsed_sec": 1190.9
+}

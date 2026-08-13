@@ -1,0 +1,132 @@
+{
+ "meta": {
+  "strategy": "早盘冲板追击(early_surge_chase_0940) 影子探测",
+  "date": "2026-07-24",
+  "prev_date": "2026-07-23",
+  "mode": "dry-run",
+  "started_at": "2026-08-05 10:07:42",
+  "finished_at": "2026-08-05 10:07:43",
+  "whitelist": 2299,
+  "watched": 13,
+  "rounds_or_replay_codes": 20,
+  "rate_limit": {
+   "poll_interval_s": 10.0,
+   "min_req_gap_s": 1.0,
+   "max_req_per_round": 4
+  },
+  "skip_counts": {
+   "yizi": 2,
+   "vol_ratio": 3
+  }
+ },
+ "signals": [
+  {
+   "code": "sh.600962",
+   "name": "国投中鲁",
+   "confirm_bar": "0935",
+   "confirm_ts": "09:30:05",
+   "confirm_px": 24.31,
+   "buy_bar": "0940",
+   "buy_px": 23.13,
+   "buy_ts": "09:35:05",
+   "vol_ratio": 2.206,
+   "bar_vol": 3362000,
+   "rank_at_cross": null,
+   "rocket": false,
+   "ambiguous_first_cross": false,
+   "winner": true
+  },
+  {
+   "code": "sh.603726",
+   "name": "朗迪集团",
+   "confirm_bar": "0935",
+   "confirm_ts": "09:32:30",
+   "confirm_px": 24.66,
+   "buy_bar": "0940",
+   "buy_px": 23.73,
+   "buy_ts": "09:35:05",
+   "vol_ratio": 2.873,
+   "bar_vol": 1695300,
+   "rank_at_cross": null,
+   "rocket": false,
+   "ambiguous_first_cross": false,
+   "winner": false
+  },
+  {
+   "code": "sh.605299",
+   "name": "舒华体育",
+   "confirm_bar": "0935",
+   "confirm_ts": "09:30:05",
+   "confirm_px": 13.0,
+   "buy_bar": "0940",
+   "buy_px": 12.29,
+   "buy_ts": "09:35:05",
+   "vol_ratio": 2.726,
+   "bar_vol": 9420100,
+   "rank_at_cross": null,
+   "rocket": false,
+   "ambiguous_first_cross": false,
+   "winner": false
+  },
+  {
+   "code": "sz.000011",
+   "name": "深物业A",
+   "confirm_bar": "0935",
+   "confirm_ts": "09:32:30",
+   "confirm_px": 8.26,
+   "buy_bar": "0940",
+   "buy_px": 8.24,
+   "buy_ts": "09:35:05",
+   "vol_ratio": 3.752,
+   "bar_vol": 11574981,
+   "rank_at_cross": null,
+   "rocket": false,
+   "ambiguous_first_cross": false,
+   "winner": false
+  },
+  {
+   "code": "sh.600178",
+   "name": "东安动力",
+   "confirm_bar": "0940",
+   "confirm_ts": "09:37:30",
+   "confirm_px": 9.29,
+   "buy_bar": "0945",
+   "buy_px": 9.19,
+   "buy_ts": "09:40:05",
+   "vol_ratio": 8.493,
+   "bar_vol": 2598784,
+   "rank_at_cross": null,
+   "rocket": false,
+   "ambiguous_first_cross": false,
+   "winner": true
+  }
+ ],
+ "skips": [
+  {
+   "code": "sh.603221",
+   "skip": "yizi"
+  },
+  {
+   "code": "sz.000595",
+   "skip": "yizi"
+  },
+  {
+   "code": "sh.603926",
+   "bar": "0935",
+   "skip": "vol_ratio",
+   "vr": 12.856
+  },
+  {
+   "code": "sh.603956",
+   "bar": "0935",
+   "skip": "vol_ratio",
+   "vr": 11.335
+  },
+  {
+   "code": "sh.600967",
+   "bar": "0945",
+   "skip": "vol_ratio",
+   "vr": 23.44
+  }
+ ]
+}

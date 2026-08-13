@@ -14,6 +14,30 @@
 ## 关键教训
 > ⚠️ A股T+1规则下，日内研究收益 ≠ 可执行收益。所有策略必须用T+1/T+2真实退出收益衡量。
 
+## 生产组合策略文档（统一引擎验证, 现行/候选）
+
+| Slot | 策略 | CAGR(slot=1) | 状态 | 文档 |
+|------|------|--------------|------|------|
+| S1 | **firstboard_low_open_dip_v2 (FB-A v2)** | **+102.80%** (MDD 36.44%全registry最低) | ✅生产(26/7/30起, Task#68) | [详情](firstboard_low_open_dip_v2.md) |
+| S1旧 | limitup_early_seal | +56.73%(v2参数) | 🔴已退役(26/7/30) | [详情](limitup_early_seal.md) |
+| S2 | amplitude_reversal | +137% | ✅生产 | [详情](amplitude_reversal.md) |
+| S3 | gem_star_late_seal | +152.92% | ✅生产 | [详情](gem_star_late_seal.md) |
+| S4 | big_yang_low_open_v2 | +113.77%(trail4/SL6可执行口径) | ✅生产 | [详情](big_yang_low_open_v2.md) |
+| S5 | **two_board_pullback_dip_h1c (B2-A)** | **+211.27%** (F2参数, 26/7/30起; 原+107.79%) | ✅生产(26/7/27起, F2升级Task#68) | [详情](two_board_pullback_dip_h1c.md) |
+| S5旧 | gem_star_limitup_low_open | 无alpha(可执行口径) | 🔴已退役(26/7/27) | [详情](gem_star_limitup_low_open.md) |
+
+## 归档策略（引擎验证过、不达标但有保留价值）
+
+| 策略 | CAGR(slot=1) | 亮点 | 归档原因 |
+|------|--------------|------|----------|
+| oversold_yang_dip_h1c (Task#57) | +39.21% (原版+33.23%) | MDD 35.95%全场最低+与全部生产策略零重叠 | 信号密度天花板(63笔/年), B2-A组合拳(H1c卖+slot复用)机制成立但仅+6pp, <70%观察池门槛; 未来组合分散性研究可再评估 |
+
+## 组合级 Overlay（非选股策略）
+
+| 名称 | 机制 | 效果(组合级) | 状态 | 文档 |
+|------|------|--------------|------|------|
+| 冰点减仓 ICE35/w0.3 | D-1涨停家数<35→新开仓×0.3 | 新基线口径 +190.56%→+168.77% / Calmar改善(Task#67审批包) | ✅已实盘启用(26/7/30起, Task#68) | [详情](ice_position_overlay.md) |
+
 ## 策略列表（按T+1可执行收益排序）
 
 | # | 策略 | T+1可执行收益 | T+1胜率 | 6年样本 | 状态 | 文档 |

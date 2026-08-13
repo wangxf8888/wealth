@@ -1,0 +1,925 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""[Task#77] BaoStock解禁自动恢复流水线 —— 解禁后全部欠账回补从"靠人工记忆"变自动闭环。
+
+触发链路:
+  baostock_recovery_probe.py 检测到解禁(recovered首次翻转True)
+    → 钩子一行调起本脚本 --auto (nohup分离进程)
+  resume cron(每小时) → --resume 续跑(预算暂停次日续/盘中暂停盘后续);
+    状态非待续时秒级退出, 解禁前流水线待命零成本。
+
+恢复序列(状态机阶段, 断点续跑, 每步幂等):
+  s1_stock_hour  stock_kline hour1-4回补: 扫描降级日(2026-07-25起hour1
+                 NULL占比>50%) → 逐日 subprocess fetch_daily_kline.py DATE
+                 (复用其hour写入路径+限速铁律≥0.5s/req+熔断)。
+                 完成判据: 该日NULL占比<2%。
+  s2_index       index_kline权威值刷新(amount等, 腾讯降级行→BaoStock权威):
+                 REPLACE前先读出red_ratio写回, 不破坏既有列。
+                 (注: index hour列正常路径也不落地, 非封禁欠账, 不在范围)
+  s3_minute      minute.db缺口回补: 逐降级日 fetch_minute_kline.py --daily
+                 + 最后 --whitelist-from-trades(t25白名单口径, 自带断点:
+                 existing_bar_counts跳过已有bar)。
+  s4_red_ratio   update_red_ratio.py重算受影响日(REPLACE后close微调/
+                 index行red_ratio被清的兜底) + 校验非NULL。无网络。
+  s5_f2_verify   F2约束力恢复验证: 最近3个信号日重跑S5候选生成
+                 严格口径(max_seal_hour_b2=1, 用回补后hour数据) vs
+                 宽松口径(None, 即封禁期NULL hour的等效行为),
+                 差异+对照当晚candidates json → alert+STATUS证明。无网络。
+  s6_finalize    scheduler_alerts恢复摘要 + STATUS区块自动追加。
+
+纪律:
+- 限速: 子工具自带≥0.5s/req+熔断; 本脚本自身网络请求(s2)同样sleep≥0.5s。
+- 互斥: [Task#203] 实际回补启动前pgrep检查fetch_daily/minute_kline是否
+  在跑, 在跑则本轮顺延(退出码0, 事件同日幂等), 下轮resume cron再试,
+  杜绝请求强度叠加(用户频率纪律)。
+- 日更让路: [Task#222] 反向互斥——交易日18:25~23:59且当日daily_update链
+  未完成(日志无"每日数据更新结束"行)时, 回补不启动/批间检查点让路收工,
+  避免长跑持stocks.db写锁阻塞18:30日K更新(8/7事故263只缺口根因)。
+- 预算: 单日≤20000请求(估算值), 超预算paused_budget次日自动续。
+- 静默: 交易日08:30-16:00网络步骤一律暂停(覆盖盘中9:25-15:00行情优先
+  + 晨间8:30-9:40决策静默; [Task#194]延至16:00, 交易时段确认解禁时回补
+  推迟到16:00后由resume cron续跑), paused_market盘后自动续。
+- 幂等: flock防重入; 状态机落盘 data/realtime/recovery_state.json 原子写。
+- 本脚本绝不主动探测BaoStock login(只信ban_status), 不加重封禁。
+
+用法:
+  python3 tools/baostock_recovery.py --auto      # 探测钩子调用
+  python3 tools/baostock_recovery.py --resume    # cron续跑(待命时秒退)
+  python3 tools/baostock_recovery.py --status    # 查看状态机
+  python3 tools/baostock_recovery.py --dry-run --mock-ban-status F --state-file F
+                                                 # 测试: 打印计划不发请求
+"""
+import argparse
+import fcntl
+import json
+import os
+import sqlite3
+import subprocess
+import sys
+import tempfile
+import time
+from datetime import datetime, date as _date
+
+PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, PROJECT_ROOT)
+
+DB = '/home/AIWealth/data/stocks.db'
+BAN_STATUS = '/home/AIWealth/data/baostock_ban_status.json'
+STATE_FILE = '/home/AIWealth/data/realtime/recovery_state.json'
+ALERT_LOG = '/home/AIWealth/logs/realtime/scheduler_alerts.log'
+LOG_FILE = '/home/AIWealth/logs/realtime/baostock_recovery.log'
+STATUS_MD = '/home/AIWealth/PROJECT_STATUS.md'
+RT_DIR = '/home/AIWealth/data/realtime'
+TOOLS = os.path.dirname(os.path.abspath(__file__))
+
+DEGRADE_SINCE = '2026-07-25'      # 封禁次日起扫描降级日(7/24数据完整已核验)
+DAILY_BUDGET = 20000              # 单日BaoStock请求预算(估算口径)
+# [Task#201] 用户要求2026-08-06: 控制单日处理量 — 恢复流水线单日处理股票数
+# 上限(s1股票级粒度), 达到即优雅收工(保存游标+写daily_cap_reached事件+
+# 退出码0), 次日resume cron自然续跑, 降低对上游数据服务的压力
+DAILY_BACKFILL_CAP = 2000
+# [Task#203] 并发互斥门: 这些数据拉取脚本在跑时(如18:30盘后cron的当日增量
+# 更新), 恢复流水线不得同时启动回补 — 两者并发会把上游请求强度叠加
+# (~0.3+0.5 req/s), 违反用户频率纪律。检测到即优雅顺延至下轮resume cron。
+MUTEX_FETCH_SCRIPTS = ('fetch_daily_kline.py', 'fetch_minute_kline.py')
+# [Task#222] 日更窗口让路(反向互斥, 8/7事故根因修复): Hal#203互斥门只防了
+# recovery启动时fetch已在跑的单向; 反向(recovery长跑在前, 18:30 daily_update
+# 后启)裸奔 — 8/7 recovery回补0727小时K长跑160分钟持stocks.db写锁至19:06,
+# 日K更新前263只全部撞锁。修复: 交易日18:25~23:59且当日daily_update链未
+# 完成(日志无DAILY_DONE_MARK行) → 回补不启动/批间检查点让路收工保存进度。
+DAILY_LOG_DIR = '/home/AIWealth/logs'
+DAILY_DONE_MARK = '每日数据更新结束'
+DAILY_WINDOW_START_HM = 18 * 60 + 25   # 18:25(daily_update cron 18:30前5分钟预留)
+# [Task#222] SQLite连接加固: 与fetch_daily_kline.py同配置(t220补拉实证零失败)
+SQLITE_TIMEOUT = 60              # sqlite3.connect timeout秒数
+SQLITE_BUSY_TIMEOUT_MS = 60000   # PRAGMA busy_timeout毫秒
+NULL_DONE_RATIO = 0.02            # s1完成判据: hour1 NULL占比<2%
+BAOSTOCK_MIN_INTERVAL = 0.5       # 本脚本自身请求限速(与Task#31铁律一致)
+
+STEPS = ['s1_stock_hour', 's2_index', 's3_minute',
+         's4_red_ratio', 's5_f2_verify', 's6_finalize']
+# 需要网络(受静默窗口+预算约束)的步骤
+NET_STEPS = {'s1_stock_hour', 's2_index', 's3_minute'}
+
+
+def log(msg):
+    line = f"{datetime.now().strftime('%Y-%m-%d %H:%M:%S')} [recovery] {msg}"
+    print(line, flush=True)
+    try:
+        with open(LOG_FILE, 'a', encoding='utf-8') as f:
+            f.write(line + '\n')
+    except OSError:
+        pass
+
+
+def alert(msg):
+    try:
+        with open(ALERT_LOG, 'a', encoding='utf-8') as f:
+            f.write(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] "
+                    f"[RECOVERY_PIPELINE] {msg}\n")
+    except OSError:
+        pass
+
+
+def db_connect(path):
+    """[Task#222] 统一SQLite连接入口: timeout=60+busy_timeout=60000 —
+    撞锁时排队等待而非默认5s即抛database is locked(8/7事故263只日K
+    缺口的兜底保险, 与fetch_daily_kline.py同配置)。"""
+    conn = sqlite3.connect(path, timeout=SQLITE_TIMEOUT)
+    conn.execute(f"PRAGMA busy_timeout={SQLITE_BUSY_TIMEOUT_MS}")
+    return conn
+
+
+# =====================================================================
+# 状态机(原子落盘, 阶段级断点)
+# =====================================================================
+
+class State:
+    def __init__(self, path):
+        self.path = path
+        self.data = self._load()
+
+    def _load(self):
+        if os.path.exists(self.path):
+            try:
+                with open(self.path, encoding='utf-8') as f:
+                    return json.load(f)
+            except (json.JSONDecodeError, OSError):
+                pass
+        return {'version': 1, 'state': 'idle', 'triggered_at': None,
+                'steps': {s: {'status': 'pending', 'detail': ''}
+                          for s in STEPS},
+                'budget': {'date': '', 'used': 0}}
+
+    def save(self):
+        self.data['updated_at'] = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        d = os.path.dirname(self.path)
+        os.makedirs(d, exist_ok=True)
+        fd, tmp = tempfile.mkstemp(dir=d, prefix='.recovery_state_')
+        with os.fdopen(fd, 'w', encoding='utf-8') as f:
+            json.dump(self.data, f, ensure_ascii=False, indent=2)
+        os.chmod(tmp, 0o644)
+        os.replace(tmp, self.path)
+
+    def step(self, name):
+        return self.data['steps'].setdefault(
+            name, {'status': 'pending', 'detail': ''})
+
+    def set_step(self, name, status, detail=''):
+        st = self.step(name)
+        st['status'] = status
+        st['detail'] = detail
+        st['updated_at'] = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        self.save()
+
+    # --- 预算(跨日自动重置) ---
+    def budget_left(self):
+        today = _date.today().isoformat()
+        b = self.data['budget']
+        if b.get('date') != today:
+            b['date'] = today
+            b['used'] = 0
+            self.save()
+        return DAILY_BUDGET - b['used']
+
+    def budget_spend(self, n):
+        self.budget_left()   # 确保date对齐
+        self.data['budget']['used'] += int(n)
+        self.save()
+
+    # --- [Task#201] 单日处理股票数上限(跨日自动重置, 与预算同构) ---
+    def cap_left(self):
+        today = _date.today().isoformat()
+        c = self.data.setdefault('daily_cap',
+                                 {'date': '', 'processed': 0})
+        if c.get('date') != today:
+            c['date'] = today
+            c['processed'] = 0
+            self.save()
+        return DAILY_BACKFILL_CAP - c['processed']
+
+    def cap_spend(self, n):
+        self.cap_left()   # 确保date对齐
+        self.data['daily_cap']['processed'] += int(n)
+        self.save()
+
+
+def in_quiet_window(now=None):
+    """交易日08:30-16:00网络静默(盘中行情优先+晨间决策静默的并集)。
+    [Task#194] 上界15:00→16:00: 解禁确认发生在交易时段时, 回补推迟到
+    16:00后启动(resume cron每小时:25自动续跑, 16:25首启)。"""
+    now = now or datetime.now()
+    if now.weekday() >= 5:
+        return False
+    hm = now.hour * 60 + now.minute
+    return 8 * 60 + 30 <= hm < 16 * 60
+
+
+def record_re_banned(note):
+    """[Task#194] 再封禁熔断: ban_status写re_banned事件(append到history,
+    字段风格与既有事件一致) + recovered翻回false, 让resume cron待命。"""
+    ts = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+    try:
+        with open(BAN_STATUS, encoding='utf-8') as f:
+            ban = json.load(f)
+    except (json.JSONDecodeError, OSError):
+        ban = {}
+    ban['recovered'] = False
+    ban['pending_confirm'] = False
+    ban.setdefault('history', []).append({
+        'event': 're_banned', 'detected_at': ts,
+        'note': f'{note} (Task#194回补熔断自动写入)'})
+    try:
+        with open(BAN_STATUS, 'w', encoding='utf-8') as f:
+            json.dump(ban, f, ensure_ascii=False, indent=2)
+    except OSError as e:
+        log(f"re_banned事件写入失败: {e}")
+    alert(f"⛔ 回补中检测到再封禁(10001011), 已熔断停止: {note}")
+    log(f"⛔ 再封禁熔断: {note} — ban_status已写re_banned事件, 流水线停止")
+
+
+def record_daily_cap_reached(done, remain, dry_run=False):
+    """[Task#201] 单日处理量达上限: ban_status.history追加daily_cap_reached
+    事件(只append不改既有字段, recovered保持不变 — 非封禁, 仅渐进收工)。
+    dry_run时alert用mock打印代替, 不写生产scheduler_alerts(Task#194门禁)。"""
+    ts = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+    try:
+        with open(BAN_STATUS, encoding='utf-8') as f:
+            ban = json.load(f)
+    except (json.JSONDecodeError, OSError):
+        ban = {}
+    ban.setdefault('history', []).append({
+        'event': 'daily_cap_reached', 'done': int(done), 'remain': int(remain),
+        'detected_at': ts,
+        'note': f'单日处理量达上限{DAILY_BACKFILL_CAP}, 优雅收工次日续跑 '
+                f'(Task#201渐进处理自动写入)'})
+    try:
+        with open(BAN_STATUS, 'w', encoding='utf-8') as f:
+            json.dump(ban, f, ensure_ascii=False, indent=2)
+    except OSError as e:
+        log(f"daily_cap_reached事件写入失败: {e}")
+    msg = (f"⏸ 恢复流水线单日处理量达上限{DAILY_BACKFILL_CAP}: "
+           f"done={done} remain={remain}, 次日resume cron自然续跑")
+    if dry_run:
+        log(f"[dry-run] alert(mock打印代替, 不写生产alert日志): {msg}")
+    else:
+        alert(msg)
+
+
+def _pid_runs_script(pid, script):
+    """[Task#203] /proc/<pid>/cmdline精确核验: 某个argv token恰为脚本路径
+    才算真在运行 — 排除shell -c包装串/日志查看等cmdline仅提及脚本名的
+    误报(pgrep -f按全cmdline子串匹配, 实测会命中这类旁观者进程)。
+    真实拉取进程形如 python3 -u /path/tools/fetch_daily_kline.py DATE,
+    其shell包装层不需另计 — 子python进程本身必被直接命中。"""
+    try:
+        with open(f'/proc/{pid}/cmdline', 'rb') as f:
+            argv = f.read().decode('utf-8', 'replace').split('\0')
+    except OSError:
+        return False   # 进程已退出(pgrep与核验间的竞态, 视为无占用)
+    return any(a == script or a.endswith('/' + script) for a in argv)
+
+
+def detect_concurrent_fetch(dry_run=False):
+    """[Task#203] 并发互斥检测: pgrep -f 初筛 + /proc cmdline精确核验,
+    返回占用描述列表(空=无互斥)。pgrep本身不匹配自身进程; 本脚本cmdline
+    不含目标脚本名, 额外过滤自身pid双保险。dry-run可用环境变量
+    T203_MOCK_MUTEX=busy|free mock检测结果(零真实pgrep依赖测试环境)。"""
+    mock = os.environ.get('T203_MOCK_MUTEX', '')
+    if dry_run and mock:
+        return ([f'{s}(mock)' for s in MUTEX_FETCH_SCRIPTS]
+                if mock == 'busy' else [])
+    busy = []
+    my_pid = str(os.getpid())
+    for script in MUTEX_FETCH_SCRIPTS:
+        try:
+            r = subprocess.run(['pgrep', '-f', script.replace('.', r'\.')],
+                               capture_output=True, text=True, timeout=10)
+        except (subprocess.SubprocessError, OSError) as e:
+            log(f"互斥检测pgrep异常(视为无占用, 不阻断): {script} {e}")
+            continue
+        pids = [p for p in r.stdout.split()
+                if p and p != my_pid and _pid_runs_script(p, script)]
+        if pids:
+            busy.append(f"{script}(pid {','.join(pids)})")
+    return busy
+
+
+def record_deferred_concurrent_fetch(busy, dry_run=False):
+    """[Task#203] 并发互斥顺延: ban_status.history追加
+    deferred_concurrent_fetch事件(只append不改既有字段, recovered保持
+    不变 — 非封禁, 仅本轮让路)。同日多次顺延只写第一条(幂等, 与Task#201
+    daily_cap_reached同款同日判重模式)。dry_run时alert用mock打印代替。"""
+    ts = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+    today = ts[:10]
+    try:
+        with open(BAN_STATUS, encoding='utf-8') as f:
+            ban = json.load(f)
+    except (json.JSONDecodeError, OSError):
+        ban = {}
+    hist = ban.setdefault('history', [])
+    if any(e.get('event') == 'deferred_concurrent_fetch'
+           and str(e.get('detected_at', ''))[:10] == today for e in hist):
+        log(f"互斥顺延事件今日已记录, 不重复写(同日幂等): {'/'.join(busy)}")
+        return False
+    hist.append({
+        'event': 'deferred_concurrent_fetch', 'detected_at': ts,
+        'note': f"{'/'.join(busy)}运行中, 顺延至下轮 "
+                f"(Task#203并发互斥门自动写入, 避免请求强度叠加)"})
+    try:
+        with open(BAN_STATUS, 'w', encoding='utf-8') as f:
+            json.dump(ban, f, ensure_ascii=False, indent=2)
+    except OSError as e:
+        log(f"deferred_concurrent_fetch事件写入失败: {e}")
+    msg = (f"⏸ 恢复流水线检测到数据拉取脚本在跑({'/'.join(busy)}), "
+           f"本轮回补顺延, 下轮resume cron自动再试(避免请求强度叠加)")
+    if dry_run:
+        log(f"[dry-run] alert(mock打印代替, 不写生产alert日志): {msg}")
+    else:
+        alert(msg)
+    return True
+
+
+def daily_update_window_pending(now=None, dry_run=False):
+    """[Task#222] 日更窗口让路判定: 交易日(周一至五)18:25~23:59且当日
+    daily_update链未完成(logs/daily_update_YYYYMMDD.log无"每日数据更新结束"
+    行) → True(recovery应让路)。8/7事故: recovery长跑实例持stocks.db写锁至
+    19:06, 18:30日K更新前263只全部撞锁; Hal#203互斥门只防了recovery启动时
+    fetch已在跑的单向, 本函数补反向。周末daily_update cron(1-5)不跑, 不受
+    此约束(周末回补窗口不浪费)。日更完成后(日志出现结束行)窗口内即放行。
+    窗口上界自然为当日23:59, 跨天后hm归零自动出窗。
+    dry-run可用环境变量T222_MOCK_DAILY_WINDOW=busy|free mock判定结果。"""
+    mock = os.environ.get('T222_MOCK_DAILY_WINDOW', '')
+    if dry_run and mock:
+        return mock == 'busy'
+    now = now or datetime.now()
+    if now.weekday() >= 5:
+        return False
+    hm = now.hour * 60 + now.minute
+    if hm < DAILY_WINDOW_START_HM:
+        return False
+    log_path = os.path.join(DAILY_LOG_DIR,
+                            f"daily_update_{now.strftime('%Y%m%d')}.log")
+    try:
+        with open(log_path, encoding='utf-8', errors='replace') as f:
+            return DAILY_DONE_MARK not in f.read()
+    except OSError:
+        return True   # 窗口内日志尚未生成 = 日更还没跑完, 保守让路
+
+
+def record_deferred_daily_window(dry_run=False):
+    """[Task#222] 日更窗口让路: ban_status.history追加deferred_daily_window
+    事件(只append不改既有字段, recovered保持不变 — 非封禁, 仅本轮让路)。
+    同日多次顺延只写第一条(幂等, 风格同Task#203 deferred_concurrent_fetch)。
+    dry_run时alert用mock打印代替, 不写生产scheduler_alerts。"""
+    ts = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+    today = ts[:10]
+    try:
+        with open(BAN_STATUS, encoding='utf-8') as f:
+            ban = json.load(f)
+    except (json.JSONDecodeError, OSError):
+        ban = {}
+    hist = ban.setdefault('history', [])
+    if any(e.get('event') == 'deferred_daily_window'
+           and str(e.get('detected_at', ''))[:10] == today for e in hist):
+        log("日更窗口让路事件今日已记录, 不重复写(同日幂等)")
+        return False
+    hist.append({
+        'event': 'deferred_daily_window', 'detected_at': ts,
+        'note': '18:25~23:59日更窗口且当日daily_update未完成, 回补让路顺延至下轮 '
+                '(Task#222日更窗口让路自动写入, 避免与18:30日K更新争抢stocks.db写锁)'})
+    try:
+        with open(BAN_STATUS, 'w', encoding='utf-8') as f:
+            json.dump(ban, f, ensure_ascii=False, indent=2)
+    except OSError as e:
+        log(f"deferred_daily_window事件写入失败: {e}")
+    msg = ('⏸ 恢复流水线处于日更窗口(18:25~23:59)且当日daily_update未完成, '
+           '本轮回补让路, 下轮resume cron自动再试(避免stocks.db写锁冲突)')
+    if dry_run:
+        log(f"[dry-run] alert(mock打印代替, 不写生产alert日志): {msg}")
+    else:
+        alert(msg)
+    return True
+
+
+# =====================================================================
+# 降级日扫描
+# =====================================================================
+
+def scan_degraded_dates(conn):
+    """stock_kline中hour1_close NULL占比>50%的日期(DEGRADE_SINCE起)。"""
+    rows = conn.execute(
+        "SELECT date, COUNT(*), SUM(hour1_close IS NULL) FROM stock_kline "
+        "WHERE date >= ? GROUP BY date ORDER BY date",
+        (DEGRADE_SINCE,)).fetchall()
+    return [(d, total, nnull) for d, total, nnull in rows
+            if total > 0 and nnull / total > 0.5]
+
+
+def date_done_s1(conn, d):
+    total, nnull = conn.execute(
+        "SELECT COUNT(*), SUM(hour1_close IS NULL) FROM stock_kline "
+        "WHERE date = ?", (d,)).fetchone()
+    return total > 0 and (nnull or 0) / total < NULL_DONE_RATIO
+
+
+# =====================================================================
+# 步骤实现(每个返回 'done'|'paused'|'failed')
+# =====================================================================
+
+def _mock_s1_cap_run(state, mock_n):
+    """[Task#201] dry-run mock: 模拟mock_n只股的s1任务, 验证单日上限收工/
+    事件写入/游标保存/次日续跑。零网络零DB写入, 游标存state文件
+    mock_s1_done字段(对应真实路径的fetch_progress+DB断点续传)。"""
+    done_before = int(state.data.get('mock_s1_done', 0))
+    remaining = mock_n - done_before
+    if remaining <= 0:
+        return 'done', f'[dry-run][mock] {mock_n}只已全部完成'
+    cap_remaining = state.cap_left()
+    if cap_remaining <= 0:
+        return ('paused_cap',
+                f'[dry-run][mock] 今日上限已用尽, done={done_before} '
+                f'remain={remaining}, 次日续跑')
+    n_process = min(cap_remaining, remaining)
+    log(f"[dry-run][mock] s1模拟任务{mock_n}只, 已完成游标{done_before}, "
+        f"本次从第{done_before + 1}只开始处理{n_process}只 "
+        f"(今日剩余上限{cap_remaining}/{DAILY_BACKFILL_CAP})")
+    state.data['mock_s1_done'] = done_before + n_process
+    state.cap_spend(n_process)
+    done_now = done_before + n_process
+    if done_now < mock_n:
+        record_daily_cap_reached(done_now, mock_n - done_now, dry_run=True)
+        return ('paused_cap',
+                f'[dry-run][mock] 单日处理量达上限{DAILY_BACKFILL_CAP}, '
+                f'done={done_now} remain={mock_n - done_now}, 游标已保存')
+    return 'done', f'[dry-run][mock] 全部{mock_n}只完成(本次{n_process}只)'
+
+
+def run_s1_stock_hour(state, dry_run):
+    # [Task#201] mock验证路径: T201_MOCK_S1_TODO=N 模拟N只股任务(仅dry-run)
+    mock_n = int(os.environ.get('T201_MOCK_S1_TODO', '0'))
+    if dry_run and mock_n:
+        return _mock_s1_cap_run(state, mock_n)
+    conn = db_connect(DB)
+    degraded = scan_degraded_dates(conn)
+    if not degraded:
+        conn.close()
+        return 'done', '无降级日(hour列已齐)'
+    done_dates, todo = [], []
+    for d, total, _ in degraded:
+        (done_dates if date_done_s1(conn, d) else todo).append((d, total))
+    for idx, (d, total) in enumerate(todo):
+        est = 2 * total   # 每股2请求(日K+60minK)
+        if in_quiet_window():
+            conn.close()
+            return 'paused_market', f'静默窗口, 待续日期: {[x[0] for x in todo]}'
+        # [Task#222] 批间检查点: 长跑中途进入18:25日更窗口 → 让路收工保存进度
+        # (已完成日期的进度在DB+fetch_progress中, 断点续传下轮自动跳过)
+        if daily_update_window_pending(dry_run=dry_run):
+            conn.close()
+            record_deferred_daily_window(dry_run=dry_run)
+            return ('paused_daily_window',
+                    f'18:25起日更窗口让路收工, 待续日期: '
+                    f'{[x[0] for x in todo[idx:]]}')
+        if state.budget_left() < est:
+            conn.close()
+            return ('paused_budget',
+                    f'{d}需~{est}请求 > 今日剩余预算{state.budget_left()}, 次日续')
+        # [Task#201] 单日处理股票数上限: 用尽则优雅收工次日续
+        cap_remaining = state.cap_left()
+        if cap_remaining <= 0:
+            conn.close()
+            remain = sum(t for _, t in todo[idx:])
+            return ('paused_cap',
+                    f'今日处理量上限{DAILY_BACKFILL_CAP}已用尽, '
+                    f'待续日期{[x[0] for x in todo[idx:]]}(~{remain}只), 次日续')
+        if dry_run:
+            log(f"[dry-run] 计划执行: fetch_daily_kline.py {d} (~{est}请求)")
+            continue
+        log(f"s1: 回补 {d} hour列 (~{est}请求, 复用fetch_daily_kline限速铁律; "
+            f"今日剩余处理量{cap_remaining}/{DAILY_BACKFILL_CAP})")
+        state.budget_spend(est)
+        # [Task#201] 剩余上限不够覆盖本日全部股票 → 传入子进程处理量上限
+        # (子进程达上限后commit+保存progress游标, 退出码4优雅收工)
+        env = os.environ.copy()
+        if cap_remaining < total:
+            env['T201_MAX_STOCKS'] = str(cap_remaining)
+        r = subprocess.run(
+            [sys.executable, os.path.join(TOOLS, 'fetch_daily_kline.py'), d],
+            cwd=PROJECT_ROOT, timeout=4 * 3600, env=env)
+        if r.returncode == 4:
+            # [Task#201] 子进程达处理量上限优雅收工(非失败)
+            state.cap_spend(cap_remaining)
+            conn.close()
+            done_today = DAILY_BACKFILL_CAP - state.cap_left()
+            remain = (total - cap_remaining
+                      + sum(t for _, t in todo[idx + 1:]))
+            record_daily_cap_reached(done_today, remain)
+            return ('paused_cap',
+                    f'{d}处理{cap_remaining}只后达单日上限'
+                    f'{DAILY_BACKFILL_CAP}, done={done_today} '
+                    f'remain={remain}, 次日续跑(断点续传自动跳已完成)')
+        if r.returncode != 0:
+            conn.close()
+            return 'failed', f'{d} fetch_daily_kline退出码{r.returncode}'
+        state.cap_spend(total)   # [Task#201] 整日完成, 记账(上界口径)
+        if not date_done_s1(conn, d):
+            conn.close()
+            return 'failed', f'{d} 回补后hour1 NULL占比仍>={NULL_DONE_RATIO:.0%}'
+        log(f"s1: {d} 完成(NULL占比达标)")
+    conn.close()
+    if dry_run and todo:
+        return 'done', f'[dry-run] 计划{len(todo)}日: {[x[0] for x in todo]}'
+    return 'done', f'回补{len(todo)}日, 已达标{len(done_dates) + len(todo)}日'
+
+
+def run_s2_index(state, dry_run):
+    conn = db_connect(DB)
+    # 降级判据: amount NULL(腾讯源不含amount字段)
+    dates = [r[0] for r in conn.execute(
+        "SELECT date FROM index_kline WHERE code='sh.000001' "
+        "AND date >= ? AND amount IS NULL ORDER BY date",
+        (DEGRADE_SINCE,))]
+    if not dates:
+        conn.close()
+        return 'done', '无amount缺失行'
+    if in_quiet_window():
+        conn.close()
+        return 'paused_market', f'静默窗口, 待续: {dates}'
+    # [Task#222] 日更窗口检查点: s2也写stocks.db, 同样让路
+    if daily_update_window_pending(dry_run=dry_run):
+        conn.close()
+        record_deferred_daily_window(dry_run=dry_run)
+        return 'paused_daily_window', f'日更窗口让路, 待续: {dates}'
+    est = len(dates) + 2
+    if state.budget_left() < est:
+        conn.close()
+        return 'paused_budget', f'需~{est}请求超预算, 次日续'
+    if dry_run:
+        conn.close()
+        return 'done', f'[dry-run] 计划BaoStock权威刷新{len(dates)}行: {dates}'
+    import math
+    import baostock as bs
+
+    def sf(v):
+        if v is None or v == '':
+            return None
+        try:
+            x = float(v)
+            return None if math.isnan(x) or math.isinf(x) else x
+        except (ValueError, TypeError):
+            return None
+
+    def rate(p, pre):
+        return (round((p / pre - 1) * 100, 4)
+                if p is not None and pre else None)
+
+    lg = bs.login()
+    if lg.error_code != '0':
+        conn.close()
+        # [Task#194] 熔断: 再遇黑名单立即写re_banned事件并停止
+        if '10001011' in str(lg.error_code) + str(lg.error_msg) \
+                or '黑名单' in str(lg.error_msg):
+            record_re_banned(f's2_index login再遇10001011: {lg.error_msg}')
+        return 'failed', f'BaoStock login失败({lg.error_code}), 疑似再度封禁'
+    state.budget_spend(1)
+    filled = 0
+    for d in dates:
+        time.sleep(BAOSTOCK_MIN_INTERVAL)
+        state.budget_spend(1)
+        rs = bs.query_history_k_data_plus(
+            'sh.000001', 'date,code,open,high,low,close,preclose,volume,amount',
+            start_date=d, end_date=d, frequency='d')
+        # [Task#194] 熔断: 回补中途任何请求再遇10001011 → 立即停止
+        if '10001011' in str(rs.error_code) + str(rs.error_msg) \
+                or '黑名单' in str(rs.error_msg):
+            bs.logout()
+            conn.close()
+            record_re_banned(f's2_index查询{d}再遇10001011: {rs.error_msg}')
+            return 'failed', f's2查询{d}再遇黑名单, 已熔断写re_banned事件'
+        rows = []
+        while rs.error_code == '0' and rs.next():
+            rows.append(rs.get_row_data())
+        if not rows:
+            log(f"s2: {d} BaoStock返回空, 保留腾讯行不动")
+            continue
+        row = rows[0]
+        o, h, l, c, pre = [sf(x) for x in row[2:7]]
+        vol, amt = sf(row[7]), sf(row[8])
+        # REPLACE会清红盘占比等既有列 → 先读出写回
+        old = conn.execute(
+            "SELECT red_ratio FROM index_kline WHERE code='sh.000001' "
+            "AND date=?", (d,)).fetchone()
+        red = old[0] if old else None
+        vals = [d, 'sh.000001', '上证综指', o, h, l, c, pre, vol, amt,
+                rate(o, pre), rate(h, pre), rate(l, pre), rate(c, pre)]
+        vals.extend([None] * 40)
+        vals.append(red)
+        conn.execute('INSERT OR REPLACE INTO index_kline VALUES ('
+                     + ','.join(['?'] * 55) + ')', vals)
+        conn.commit()
+        filled += 1
+        log(f"s2: {d} 权威刷新 close={c} amount={amt}")
+    bs.logout()
+    conn.close()
+    return 'done', f'权威刷新{filled}/{len(dates)}行(red_ratio保留)'
+
+
+def run_s3_minute(state, dry_run):
+    conn = db_connect(DB)
+    degraded_dates = [d for d, _, _ in scan_degraded_dates(conn)]
+    # s1完成后降级日扫描为空 → 用minute.db最后日期之后的交易日推缺口
+    mconn = db_connect('/home/AIWealth/data/minute.db')
+    try:
+        last_min = mconn.execute(
+            "SELECT MAX(date) FROM minute_kline").fetchone()[0] or DEGRADE_SINCE
+    finally:
+        mconn.close()
+    gap_dates = [r[0] for r in conn.execute(
+        "SELECT DISTINCT date FROM stock_kline WHERE date > ? ORDER BY date",
+        (last_min,))]
+    conn.close()
+    targets = sorted(set(degraded_dates) | set(gap_dates))
+    if in_quiet_window():
+        return 'paused_market', f'静默窗口, 待续日期: {targets}'
+    # [Task#222] 日更窗口检查点: daily_update尾段也写minute.db, 同样让路
+    if daily_update_window_pending(dry_run=dry_run):
+        record_deferred_daily_window(dry_run=dry_run)
+        return 'paused_daily_window', f'日更窗口让路, 待续日期: {targets}'
+    est_daily = 3000 * max(len(targets), 1) + 3000   # 保守估算(白名单量小)
+    if state.budget_left() < est_daily:
+        return 'paused_budget', f'估算~{est_daily}请求超预算, 次日续'
+    if dry_run:
+        return 'done', (f'[dry-run] 计划: 逐日--daily {targets} '
+                        f'+ --whitelist-from-trades(t25断点口径)')
+    state.budget_spend(est_daily)
+    for d in targets:
+        log(f"s3: fetch_minute_kline.py --daily {d}")
+        r = subprocess.run(
+            [sys.executable, os.path.join(TOOLS, 'fetch_minute_kline.py'),
+             '--daily', d], cwd=PROJECT_ROOT, timeout=2 * 3600)
+        if r.returncode != 0:
+            log(f"s3: --daily {d} 退出码{r.returncode}(该日白名单可能为空, 不阻断)")
+    log("s3: fetch_minute_kline.py --whitelist-from-trades (existing bar自动跳过)")
+    r = subprocess.run(
+        [sys.executable, os.path.join(TOOLS, 'fetch_minute_kline.py'),
+         '--whitelist-from-trades'], cwd=PROJECT_ROOT, timeout=6 * 3600)
+    if r.returncode != 0:
+        return 'failed', f'whitelist-from-trades退出码{r.returncode}'
+    return 'done', f'缺口日{targets} + 白名单断点回补完成'
+
+
+def run_s4_red_ratio(state, dry_run):
+    if dry_run:
+        return 'done', '[dry-run] 计划: update_red_ratio.py全量补NULL+受影响日校验'
+    r = subprocess.run(
+        [sys.executable, os.path.join(TOOLS, 'update_red_ratio.py')],
+        cwd=PROJECT_ROOT, timeout=600)
+    if r.returncode != 0:
+        return 'failed', f'update_red_ratio退出码{r.returncode}'
+    conn = db_connect(DB)
+    bad = [r0[0] for r0 in conn.execute(
+        "SELECT date FROM index_kline WHERE code='sh.000001' "
+        "AND date >= ? AND red_ratio IS NULL", (DEGRADE_SINCE,))]
+    conn.close()
+    if bad:
+        return 'failed', f'重算后red_ratio仍NULL: {bad}'
+    return 'done', 'red_ratio受影响日全部非NULL(emotion口径同源自动受益)'
+
+
+def run_s5_f2_verify(state, dry_run):
+    """F2约束力恢复验证: 严格(max_seal_hour_b2=1) vs 宽松(None)重跑S5候选。"""
+    if dry_run:
+        return 'done', ('[dry-run] 计划: 最近3信号日S5候选 严格vs宽松 diff '
+                        '+对照当晚candidates json')
+    from realtime.data_feed import RealtimeDataFeed
+    from strategies.two_board_pullback_dip_h1c import (
+        TwoBoardPullbackDipH1cStrategy)
+    conn = db_connect(DB)
+    sig_dates = [r[0] for r in conn.execute(
+        "SELECT DISTINCT date FROM stock_kline ORDER BY date DESC LIMIT 3")]
+    conn.close()
+    sig_dates.reverse()
+    report, contaminated = [], []
+    for sd in sig_dates:
+        feed = RealtimeDataFeed(DB)
+        # signal模式重放当晚22:00候选生成(trade_date用合成次日占位)
+        trade_date = sd + '_next'
+        feed.set_signal_mode(sd, trade_date)
+        strict = TwoBoardPullbackDipH1cStrategy()
+        assert strict.max_seal_hour_b2 == 1, 'S5生产参数漂移, 验证前提失效'
+        strict_set = set(strict.get_candidates(trade_date, feed))
+        lenient = TwoBoardPullbackDipH1cStrategy()
+        lenient.max_seal_hour_b2 = None   # 封禁期NULL hour的等效行为
+        lenient_set = set(lenient.get_candidates(trade_date, feed))
+        feed.close()
+        removed = sorted(lenient_set - strict_set)
+        report.append(f"{sd}: 宽松{len(lenient_set)}只 → 严格{len(strict_set)}只"
+                      f", F2剔除{len(removed)}只 {removed if removed else ''}")
+        # 对照当晚真实candidates json里的S5(封禁期生成=宽松口径)
+        for f in sorted(os.listdir(RT_DIR)):
+            if not (f.startswith('candidates_') and f.endswith('.json')):
+                continue
+            try:
+                cj = json.load(open(os.path.join(RT_DIR, f), encoding='utf-8'))
+            except (json.JSONDecodeError, OSError):
+                continue
+            if cj.get('signal_date') != sd:
+                continue
+            s5 = cj.get('strategies', {}).get('S5', {})
+            stored = {c['code'] for c in s5.get('candidates', [])}
+            polluted = sorted(stored & set(removed))
+            if polluted:
+                contaminated.append(f"{f} S5含F2应剔除候选: {polluted}")
+    detail = ' | '.join(report)
+    if contaminated:
+        alert("F2验证发现封禁期候选污染: " + '; '.join(contaminated))
+        detail += ' ⚠️污染: ' + '; '.join(contaminated)
+    alert(f"F2约束力恢复验证完成: {detail}")
+    return 'done', detail
+
+
+def run_s6_finalize(state, dry_run):
+    if dry_run:
+        return 'done', '[dry-run] 计划: alert摘要+STATUS区块追加'
+    lines = [f"  - {s}: {state.step(s)['status']} — {state.step(s)['detail']}"
+             for s in STEPS[:-1]]
+    summary = ('BaoStock解禁恢复流水线全部完成:\n' + '\n'.join(lines))
+    alert('恢复流水线完成 ✅ 明细见PROJECT_STATUS.md Task#77区块')
+    # STATUS区块追加(锚点下插入, 原子写)
+    try:
+        with open(STATUS_MD, encoding='utf-8') as f:
+            content = f.read()
+        anchor = '<!-- 新任务区块一律插入在此注释之下（时间倒序，最新在前） -->'
+        ts = datetime.now().strftime('%Y-%m-%d %H:%M')
+        block = (f"\n\n## ♻️ 事件: BaoStock解禁自动恢复流水线执行完成 "
+                 f"({ts}, 自动生成/Task#77)\n\n"
+                 f"**探测→回补→验证全自动闭环**(tools/baostock_recovery.py):\n"
+                 + '\n'.join(f"- {s}: {state.step(s)['status']} — "
+                             f"{state.step(s)['detail']}" for s in STEPS[:-1]))
+        if anchor in content and f"解禁自动恢复流水线执行完成 ({ts}" not in content:
+            content = content.replace(anchor, anchor + block, 1)
+            fd, tmp = tempfile.mkstemp(dir=os.path.dirname(STATUS_MD),
+                                       prefix='.status_t77_')
+            with os.fdopen(fd, 'w', encoding='utf-8') as f:
+                f.write(content)
+            os.chmod(tmp, 0o644)
+            os.replace(tmp, STATUS_MD)
+    except OSError as e:
+        log(f"STATUS追加失败(不影响主流程): {e}")
+    log(summary)
+    return 'done', '摘要已写alert+STATUS'
+
+
+STEP_FUNCS = {'s1_stock_hour': run_s1_stock_hour, 's2_index': run_s2_index,
+              's3_minute': run_s3_minute, 's4_red_ratio': run_s4_red_ratio,
+              's5_f2_verify': run_s5_f2_verify, 's6_finalize': run_s6_finalize}
+
+
+# =====================================================================
+# 主循环
+# =====================================================================
+
+def run_pipeline(state, dry_run=False):
+    state.data['state'] = 'running'
+    if not state.data.get('triggered_at'):
+        state.data['triggered_at'] = datetime.now().strftime(
+            '%Y-%m-%d %H:%M:%S')
+    state.save()
+    for name in STEPS:
+        st = state.step(name)
+        if st['status'] == 'done':
+            continue
+        log(f"=== 步骤 {name} 开始 (断点续跑: 之前状态={st['status']}) ===")
+        state.set_step(name, 'running')
+        try:
+            result, detail = STEP_FUNCS[name](state, dry_run)
+        except Exception as e:
+            result, detail = 'failed', f'{type(e).__name__}: {e}'
+        if result == 'done':
+            state.set_step(name, 'done', detail)
+            log(f"=== 步骤 {name} 完成: {detail} ===")
+        elif result in ('paused_market', 'paused_budget', 'paused_cap',
+                        'paused_daily_window'):
+            state.set_step(name, 'pending', detail)
+            state.data['state'] = result
+            state.save()
+            log(f"流水线暂停({result}): {detail} — resume cron自动续跑")
+            # [Task#201] 单日处理量达上限属优雅收工(游标已存+事件已写),
+            # 退出码0区别于其他暂停; 次日resume cron自然续跑
+            # [Task#222] 日更窗口让路同属优雅收工(退出码0, 下轮resume再试)
+            return (0 if result in ('paused_cap', 'paused_daily_window')
+                    else 1)
+        else:
+            state.set_step(name, 'failed', detail)
+            state.data['state'] = 'failed'
+            state.save()
+            alert(f"恢复流水线步骤{name}失败: {detail} — 人工介入后 --resume 续跑")
+            log(f"步骤 {name} 失败: {detail}")
+            return 2
+    state.data['state'] = 'done'
+    state.save()
+    return 0
+
+
+def main():
+    ap = argparse.ArgumentParser(description='BaoStock解禁自动恢复流水线(Task#77)')
+    ap.add_argument('--auto', action='store_true', help='探测钩子触发')
+    ap.add_argument('--resume', action='store_true', help='cron续跑')
+    ap.add_argument('--status', action='store_true', help='查看状态机')
+    ap.add_argument('--dry-run', action='store_true',
+                    help='打印计划不发网络请求')
+    ap.add_argument('--mock-ban-status', default=None,
+                    help='测试: 指定mock ban_status文件')
+    ap.add_argument('--state-file', default=None,
+                    help='测试: 指定状态机文件路径')
+    args = ap.parse_args()
+
+    # [Task#201] mock ban_status时事件写入(re_banned/daily_cap_reached)同样
+    # 重定向到mock文件, 保证测试不污染生产ban_status
+    global BAN_STATUS
+    if args.mock_ban_status:
+        BAN_STATUS = args.mock_ban_status
+
+    ban_path = args.mock_ban_status or BAN_STATUS
+    state_path = args.state_file or STATE_FILE
+    state = State(state_path)
+
+    if args.status:
+        print(json.dumps(state.data, ensure_ascii=False, indent=2))
+        return 0
+
+    # 前置守卫: 只信探测结果, 本脚本绝不自己撞BaoStock login
+    try:
+        with open(ban_path, encoding='utf-8') as f:
+            ban = json.load(f)
+    except (json.JSONDecodeError, OSError):
+        ban = {}
+    if not ban.get('recovered'):
+        if args.resume:
+            return 0        # 待命: 未解禁, cron秒退
+        log("ban_status.recovered != true, 流水线待命不启动")
+        return 0
+
+    if state.data['state'] == 'done':
+        if not args.resume:
+            log("流水线已完成(state=done), 幂等退出")
+        return 0
+    if args.resume and state.data['state'] == 'idle':
+        # 解禁但从未触发(钩子失效场景的兜底): resume cron代为触发
+        log("resume兜底: 检测到已解禁但流水线未触发, 代为启动")
+    if args.resume and state.data['state'] == 'failed':
+        return 0            # 失败态不自动重试, 等人工介入后手动--resume? 手动跑无--resume即可
+
+    # flock防重入(同一状态文件维度)
+    lock_path = state_path + '.lock'
+    lock_f = open(lock_path, 'w')
+    try:
+        fcntl.flock(lock_f, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except BlockingIOError:
+        log("另一实例正在运行(flock占用), 退出")
+        return 0
+
+    try:
+        if state.data['state'] == 'failed':
+            log("失败态手动续跑: 重置failed步骤为pending")
+            for s in STEPS:
+                if state.step(s)['status'] == 'failed':
+                    state.set_step(s, 'pending', '手动续跑重置')
+        # [Task#203] 并发互斥门: 位于冷静期二次确认之后(probe端pending_confirm
+        # →recovered状态推进在probe脚本内完成, 不经过此处不受影响)、实际回补
+        # 启动之前 — 网络步骤(s1-s3)尚未全部完成且数据拉取脚本在跑时, 本轮
+        # 优雅顺延退出码0, 下轮resume cron(每小时:25)自然再试; 无网络尾步
+        # (s4-s6)不受互斥门约束可继续收尾。
+        if any(state.step(s)['status'] != 'done' for s in NET_STEPS):
+            # [Task#222] 日更窗口让路门(反向互斥): 交易日18:25~23:59内当日
+            # daily_update链未完成 → 回补不启动, 让18:30日K更新独占stocks.db
+            # 写锁(8/7事故: recovery长跑持锁至19:06致日K前263只撞锁;
+            # Hal#203只防了recovery启动时fetch已在跑的单向)。
+            if daily_update_window_pending(dry_run=args.dry_run):
+                record_deferred_daily_window(dry_run=args.dry_run)
+                # 顺延态落盘(同Hal#203 deferred_mutex时序修复): 若保持failed/
+                # idle, 下轮--resume会被前置守卫秒退永不再试
+                state.data['state'] = 'deferred_daily_window'
+                state.save()
+                log("日更窗口让路门: 18:25~23:59且当日daily_update未完成, "
+                    "本轮回补顺延(退出码0, 下轮resume cron再试)")
+                return 0
+            busy = detect_concurrent_fetch(dry_run=args.dry_run)
+            if busy:
+                record_deferred_concurrent_fetch(busy, dry_run=args.dry_run)
+                # 顺延态落盘: 若保持failed/idle, 下轮--resume会被前置守卫
+                # 秒退永不再试 — 置deferred_mutex让resume cron正常接住
+                state.data['state'] = 'deferred_mutex'
+                state.save()
+                log(f"并发互斥门: {'/'.join(busy)} 在跑, 本轮回补顺延"
+                    f"(退出码0, 下轮resume cron再试)")
+                return 0
+        return run_pipeline(state, dry_run=args.dry_run)
+    finally:
+        fcntl.flock(lock_f, fcntl.LOCK_UN)
+        lock_f.close()
+
+
+if __name__ == '__main__':
+    sys.exit(main())

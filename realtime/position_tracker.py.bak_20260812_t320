@@ -1,0 +1,1630 @@
+#!/usr/bin/env python3
+"""
+持仓跟踪与卖出监控 (盘中每小时/收盘后触发)
+=============================================
+策略无关框架 - 对所有持仓调用对应策略的should_sell接口。
+
+**动态再平衡模式**:
+- 每次卖出后更新 account.total_nav
+- 下次买入金额 = total_nav / 5 (不是独立slot资金)
+- 与回测引擎 portfolio.py 的逻辑完全一致 (buy_amount = get_nav() / n_slots)
+
+功能:
+1. 维护持仓JSON (/home/AIWealth/data/realtime/positions.json)
+2. 盘中每小时检查止盈/止损/到期
+3. 确认买入(pending → holding)
+4. 确认卖出(holding → closed)
+5. 列出持仓/历史
+`
+命令:
+  python realtime/position_tracker.py check [--test-date YYYY-MM-DD] [--hour N]
+  python realtime/position_tracker.py confirm-buy
+  python realtime/position_tracker.py confirm-sell CODE PRICE
+  python realtime/position_tracker.py add CODE NAME STRATEGY SLOT_ID BUY_PRICE TP SL EXPIRE
+  python realtime/position_tracker.py list
+"""
+import sys
+import os
+import json
+import importlib
+import argparse
+import sqlite3
+import urllib.request
+import re
+import time
+from datetime import datetime, timedelta
+
+PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, PROJECT_ROOT)
+
+import trading_rules
+from realtime.config import (ACTIVE_STRATEGIES, DATA_DB, OUTPUT_DIR,
+                             VC_DYNAMIC_SLOTS,
+                             DRAWDOWN_BOOST_ENABLED, DRAWDOWN_BOOST_X,
+                             DRAWDOWN_BOOST_STATE_FILE)
+
+POSITIONS_FILE = os.path.join(OUTPUT_DIR, 'positions.json')
+PENDING_FILE = os.path.join(OUTPUT_DIR, 'pending_buys.json')
+
+# 盘中守护进程(realtime/intraday_monitor.py)心跳协调:
+# daemon每轮询(10s, 退避时30s)写心跳; cron auto-close看到新鲜心跳(<60s)则跳过,
+# 由daemon负责; 心跳超时(daemon死亡)→cron接管并写scheduler_alerts.log
+# (10分钟scheduler会展示)
+HEARTBEAT_FILE = os.path.join(PROJECT_ROOT, 'logs', 'realtime',
+                              'intraday_monitor_heartbeat')
+DAEMON_STALE_SEC = 60
+SCHEDULER_ALERT_LOG = os.path.join(PROJECT_ROOT, 'logs', 'realtime',
+                                   'scheduler_alerts.log')
+_DAEMON_DOWN_MARK = os.path.join(PROJECT_ROOT, 'logs', 'realtime',
+                                 '.intraday_daemon_down_alerted')
+
+
+def daemon_heartbeat_age() -> float:
+    """守护进程心跳文件距今秒数; 无心跳文件返回None。"""
+    try:
+        return time.time() - os.path.getmtime(HEARTBEAT_FILE)
+    except OSError:
+        return None
+
+
+def alert_daemon_down(age):
+    """daemon心跳超时告警(写scheduler_alerts.log, 每日去重)。
+
+    仅在交易时段内应告警(15:00后daemon自然退出属正常), 由调用方把关时段。
+    """
+    today = datetime.now().strftime('%Y-%m-%d')
+    try:
+        if os.path.exists(_DAEMON_DOWN_MARK):
+            with open(_DAEMON_DOWN_MARK, 'r') as f:
+                if f.read().strip() == today:
+                    return  # 今日已告警过
+        age_desc = f"{age:.0f}s前" if age is not None else "从未写入"
+        ts = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        with open(SCHEDULER_ALERT_LOG, 'a', encoding='utf-8') as f:
+            f.write(f"[{ts}] ⚠️ 盘中监控守护进程心跳超时(最后心跳{age_desc}, "
+                    f"阈值{DAEMON_STALE_SEC}s), cron已接管卖出检查; "
+                    f"请检查 intraday_monitor.py (log: intraday_monitor.log)\n")
+        with open(_DAEMON_DOWN_MARK, 'w') as f:
+            f.write(today)
+        print(f"[cron接管] 守护进程心跳超时({age_desc}), "
+              f"已写scheduler_alerts.log, cron兜底执行卖出检查")
+    except OSError as e:
+        print(f"[WARN] 写daemon心跳告警失败(非致命): {e}")
+
+
+# =============================================================================
+# 策略加载
+# =============================================================================
+
+def load_strategy_by_name(strategy_name: str):
+    """通过策略name查找配置并加载。"""
+    for cfg in ACTIVE_STRATEGIES:
+        if not cfg['enabled']:
+            continue
+        try:
+            mod = importlib.import_module(cfg['module'])
+            cls = getattr(mod, cfg['class'])
+            instance = cls()
+            if instance.name == strategy_name:
+                return instance
+        except Exception:
+            continue
+    return None
+
+
+def load_strategy_by_slot(slot_id: str):
+    """通过slot_id加载策略。"""
+    for cfg in ACTIVE_STRATEGIES:
+        if cfg['slot_id'] == slot_id and cfg['enabled']:
+            try:
+                mod = importlib.import_module(cfg['module'])
+                cls = getattr(mod, cfg['class'])
+                return cls()
+            except Exception:
+                return None
+    return None
+
+
+# =============================================================================
+# 持仓文件操作
+# =============================================================================
+
+# 默认账户结构
+DEFAULT_ACCOUNT = {
+    'initial_capital': 1000000,
+    'cash': 1000000,
+    'realized_pnl': 0.0,
+    'total_nav': 1000000,
+    'note': '实盘采用动态再平衡模式: 每slot买入金额 = total_nav / 5'
+}
+
+
+def load_positions() -> dict:
+    """加载持仓文件。兼容新旧格式。
+
+    新格式: {account: {...}, positions: [...], closed_trades: [...]}
+    旧格式: {positions: [...]}  (closed记录混在positions里)
+    """
+    if not os.path.exists(POSITIONS_FILE):
+        return {
+            'account': DEFAULT_ACCOUNT.copy(),
+            'positions': [],
+            'closed_trades': []
+        }
+    with open(POSITIONS_FILE, 'r', encoding='utf-8') as f:
+        data = json.load(f)
+
+    # 确保有account字段
+    if 'account' not in data:
+        data['account'] = DEFAULT_ACCOUNT.copy()
+    # 确保有closed_trades字段
+    if 'closed_trades' not in data:
+        data['closed_trades'] = []
+    return data
+
+
+def save_positions(data: dict):
+    """保存持仓文件(原子写: 临时文件+rename, server.py无锁随时读, 不能出现半截文件)。"""
+    os.makedirs(os.path.dirname(POSITIONS_FILE), exist_ok=True)
+    # 更新total_nav
+    _update_account_nav(data)
+    # 现金守恒断言(P0账本修正2026-07-30): 对不上拒写+告警, 防再次基数污染
+    _assert_cash_conservation(data)
+    tmp_path = POSITIONS_FILE + '.tmp'
+    with open(tmp_path, 'w', encoding='utf-8') as f:
+        json.dump(data, f, ensure_ascii=False, indent=2)
+    os.replace(tmp_path, POSITIONS_FILE)
+
+
+def _assert_cash_conservation(data: dict):
+    """现金守恒不变量: cash = initial_capital + Σclosed pnl_amount - Σholding buy_amount。
+
+    每次现金变动必须可归因于可枚举交易流(买-/卖+), 容差1分;
+    超差 -> 写告警日志 + 拒绝落盘(raise), 宁可中断也不让错账持久化。
+    背景: 7/22建仓补录曾以错误基数985,740初始化现金, 少记¥14,260带到7/30才发现。
+    """
+    account = data.get('account') or {}
+    if 'cash' not in account:
+        return
+    expected = (account.get('initial_capital', 0)
+                + sum(t.get('pnl_amount') or 0 for t in data.get('closed_trades', []))
+                - sum(p.get('buy_amount') or 0 for p in data.get('positions', [])
+                      if p.get('status') == 'holding'))
+    diff = account['cash'] - expected
+    if abs(diff) > 0.010001:
+        msg = (f"现金守恒断言失败: cash={account['cash']:.4f} 应为{expected:.4f} "
+               f"(偏差{diff:+.4f}), 拒绝写入positions.json")
+        line = (f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] "
+                f"[CASH_GUARD] 🚨 {msg}")
+        print(line)
+        try:
+            with open(f'{os.path.dirname(os.path.dirname(POSITIONS_FILE))}/../logs/realtime/scheduler_alerts.log', 'a') as f:
+                f.write(line + '\n')
+        except Exception:
+            pass
+        raise ValueError(msg)
+
+
+def _update_account_nav(data: dict):
+    """更新 account.total_nav = cash + 持仓市值(以买入价估算)。"""
+    account = data.get('account', DEFAULT_ACCOUNT.copy())
+    positions = data.get('positions', [])
+    holdings = [p for p in positions if p.get('status') == 'holding']
+
+    # 持仓市值: 用buy_price * buy_amount/buy_price = buy_amount (无实时价时)
+    holding_value = sum(p.get('buy_amount', account['initial_capital'] / 5) for p in holdings)
+    account['total_nav'] = account['cash'] + holding_value
+    data['account'] = account
+
+
+def get_buy_amount(data: dict, scale: float = 1.0) -> float:
+    """动态再平衡: 每个slot的买入金额 = total_nav / 5 × scale。
+
+    与回测引擎 portfolio.py 的逻辑一致:
+      target_amount = self.get_nav() / self.n_slots
+    scale(Task#68): 冰点减仓overlay系数(默认1.0零侵入),
+    与回测 position_scale.PositionScaler 同语义(只影响新开仓金额)。
+    """
+    account = data.get('account', DEFAULT_ACCOUNT.copy())
+    positions = data.get('positions', [])
+    holdings = [p for p in positions if p.get('status') == 'holding']
+
+    # total_nav = cash + 持仓市值
+    holding_value = sum(p.get('buy_amount', account['initial_capital'] / 5) for p in holdings)
+    total_nav = account['cash'] + holding_value
+
+    buy_amount = total_nav / 5 * scale
+    if VC_DYNAMIC_SLOTS:
+        # V-C(用户裁决2026-07-31): 不缩水不钳制 —— 现金不足由confirm_buy
+        # 硬断言拒单(杜绝先买后卖), 此处min(cash)缩水语义废除
+        return buy_amount
+    # 现行路径: 不能超过可用现金(缩水买, V-C切换后不再走到)
+    buy_amount = min(buy_amount, account['cash'])
+    return buy_amount
+
+
+def load_pending() -> list:
+    """加载待确认买入。"""
+    if not os.path.exists(PENDING_FILE):
+        return []
+    with open(PENDING_FILE, 'r', encoding='utf-8') as f:
+        return json.load(f)
+
+
+def save_pending(data: list):
+    """保存待确认买入。"""
+    os.makedirs(os.path.dirname(PENDING_FILE), exist_ok=True)
+    with open(PENDING_FILE, 'w', encoding='utf-8') as f:
+        json.dump(data, f, ensure_ascii=False, indent=2)
+
+
+# =============================================================================
+# 实时行情
+# =============================================================================
+
+def code_to_sina(code: str) -> str:
+    return code.replace('.', '')
+
+
+def sina_to_code(sina_code: str) -> str:
+    return sina_code[:2] + '.' + sina_code[2:]
+
+
+def fetch_realtime_quotes(codes: list) -> dict:
+    """通过腾讯实时行情获取
+    {code: {'price': 当前价, 'open': 今开, 'high': 今日最高,
+            'low': 今日最低, 'preclose': 昨收,
+            'bid1': 买一价, 'bid1_vol': 买一量(手)}}。
+
+    high/low/open 用于区间触及判定(回测语义: 条件单全程挂着, 盘中触及即成交)
+    与 trailing 止盈的盘中 peak 跟踪(两次检查间的冲高不会丢失);
+    preclose 用于框架级涨跌停判定(跌停不可卖);
+    bid1/bid1_vol(Task#286) 用于跌停封死盘口二次确认(买一空=封死不可卖,
+    买一有承接=跌停价仍可成交)。qt字段[9]买一价 [10]买一量。
+    竞价期 open/low 可能为0, 调用方需据此退回快照比价。
+    """
+    if not codes:
+        return {}
+    tencent_codes = [code_to_sina(c) for c in codes]
+    results = {}
+    batch_size = 50
+
+    for i in range(0, len(tencent_codes), batch_size):
+        batch = tencent_codes[i:i + batch_size]
+        url = f"http://qt.gtimg.cn/q={','.join(batch)}"
+        try:
+            req = urllib.request.Request(url)
+            req.add_header('User-Agent',
+                           'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36')
+            resp = urllib.request.urlopen(req, timeout=10)
+            content = resp.read().decode('gbk')
+            for line in content.strip().split('\n'):
+                line = line.strip()
+                if not line:
+                    continue
+                m = re.match(r'v_(\w+)="(.*)"', line)
+                if not m:
+                    continue
+                tencent_sym = m.group(1)
+                data_str = m.group(2)
+                if not data_str:
+                    continue
+                parts = data_str.split('~')
+                if len(parts) < 4:
+                    continue
+                code = sina_to_code(tencent_sym)
+                try:
+                    current = float(parts[3]) if parts[3] else 0
+                except (ValueError, IndexError):
+                    current = 0
+                high = 0.0
+                if len(parts) > 33:
+                    try:
+                        high = float(parts[33]) if parts[33] else 0
+                    except (ValueError, IndexError):
+                        high = 0.0
+                low = 0.0
+                if len(parts) > 34:
+                    try:
+                        low = float(parts[34]) if parts[34] else 0
+                    except (ValueError, IndexError):
+                        low = 0.0
+                open_p = 0.0
+                if len(parts) > 5:
+                    try:
+                        open_p = float(parts[5]) if parts[5] else 0
+                    except (ValueError, IndexError):
+                        open_p = 0.0
+                preclose = 0.0
+                if len(parts) > 4:
+                    try:
+                        preclose = float(parts[4]) if parts[4] else 0
+                    except (ValueError, IndexError):
+                        preclose = 0.0
+                bid1 = bid1_vol = 0.0
+                if len(parts) > 10:
+                    try:
+                        bid1 = float(parts[9]) if parts[9] else 0
+                        bid1_vol = float(parts[10]) if parts[10] else 0
+                    except (ValueError, IndexError):
+                        bid1 = bid1_vol = 0.0
+                if current > 0:
+                    results[code] = {'price': current,
+                                     'open': open_p,
+                                     'high': high if high > 0 else current,
+                                     'low': low,
+                                     'preclose': preclose,
+                                     'bid1': bid1,
+                                     'bid1_vol': int(bid1_vol)}
+        except Exception as e:
+            print(f"  [WARN] 腾讯接口请求失败: {e}")
+
+    return results
+
+
+def fetch_realtime_prices(codes: list) -> dict:
+    """兼容接口: 仅返回 {code: 当前价}。"""
+    quotes = fetch_realtime_quotes(codes)
+    return {c: q['price'] for c, q in quotes.items()}
+
+
+def _fetch_test_precloses(codes: list, test_date: str) -> dict:
+    """(已废弃, 保留兼容) 测试模式: 从DB取指定日期的preclose。
+    fetch_test_prices 现已直接返回 preclose 字段。"""
+    if not codes:
+        return {}
+    conn = sqlite3.connect(DATA_DB)
+    placeholders = ','.join(['?' for _ in codes])
+    cur = conn.execute(f"""
+        SELECT code, preclose FROM stock_kline
+        WHERE date = ? AND code IN ({placeholders})
+    """, [test_date] + codes)
+    results = {row[0]: row[1] for row in cur.fetchall() if row[1] and row[1] > 0}
+    conn.close()
+    return results
+
+
+def fetch_test_prices(codes: list, test_date: str, hour: int = None) -> dict:
+    """从数据库获取测试行情, 返回与fetch_realtime_quotes同构的
+    {code: {'price','open','high','low','preclose'}}。
+
+    hour指定则price取hour{N}_close(high/low取截至该小时的累计值,
+    模拟盘中检查时腾讯接口的当日累计high/low), 否则取日close与全日high/low。
+    """
+    if not codes:
+        return {}
+    conn = sqlite3.connect(DATA_DB)
+    placeholders = ','.join(['?' for _ in codes])
+    cur = conn.execute(f"""
+        SELECT code, open, high, low, close, preclose,
+               hour1_high, hour1_low, hour1_close,
+               hour2_high, hour2_low, hour2_close,
+               hour3_high, hour3_low, hour3_close,
+               hour4_high, hour4_low, hour4_close
+        FROM stock_kline
+        WHERE date = ? AND code IN ({placeholders})
+    """, [test_date] + codes)
+    results = {}
+    for row in cur.fetchall():
+        code, d_open, d_high, d_low, d_close, preclose = row[0:6]
+        hours = [row[6 + i * 3: 9 + i * 3] for i in range(4)]  # (h,l,c)×4
+        if hour and hour in (1, 2, 3, 4):
+            # 盘中检查: price=该小时close, high/low=当日累计(开盘至该小时)
+            h_high, h_low, h_close = hours[hour - 1]
+            if not h_close or h_close <= 0:
+                continue
+            highs = [h[0] for h in hours[:hour] if h[0] and h[0] > 0]
+            lows = [h[1] for h in hours[:hour] if h[1] and h[1] > 0]
+            results[code] = {
+                'price': h_close,
+                'open': d_open or 0,
+                'high': max(highs) if highs else h_close,
+                'low': min(lows) if lows else h_close,
+                'preclose': preclose or 0,
+            }
+        else:
+            if not d_close or d_close <= 0:
+                continue
+            results[code] = {
+                'price': d_close,
+                'open': d_open or 0,
+                'high': d_high or d_close,
+                'low': d_low or d_close,
+                'preclose': preclose or 0,
+            }
+    conn.close()
+    return results
+
+
+# =============================================================================
+# 共享: 单仓触线判定/错过告警/带锁平仓
+# (tracker cron 与 intraday_monitor daemon 共用, 勿复制两份 —— Task#22)
+# =============================================================================
+
+def evaluate_position(pos: dict, quote: dict, today: str) -> dict:
+    """单仓区间触线判定+peak更新(Task#20语义)。会原地更新pos的peak字段。
+
+    quote: {'price','open','high','low','preclose'} (open/low缺失→退回快照比价)
+    返回: {
+      'skip': None|'T0'(买入当日禁卖, 仅展示),
+      'action': None|'stop_loss'|'trailing_stop'|'take_profit'|'expired',
+      'action_rec': action非None且未被跌停拦截时的卖出记录(供平仓用),
+      'blocked': True=已跌停卖单无法成交, 顺延下次检查,
+      'missed': None|{'trigger','sem_price','kind'} 错过的触发(告警不补记),
+      'state_changed': peak/日初peak有更新需落盘,
+    }
+    """
+    code = pos['code']
+    name = pos['name']
+    buy_price = pos['buy_price']
+    tp_price = pos.get('tp_price')          # trailing模式为None
+    sl_price = pos['sl_price']
+    expire_date = pos['expire_date']
+    strategy_name = pos.get('strategy', '')
+    sell_mode = pos.get('sell_mode', 'fixed')
+    trailing_pp = pos.get('trailing_pp') or 2.0
+
+    current_price = quote['price']
+    today_high = quote.get('high', current_price)
+    today_low = quote.get('low', 0)
+    today_open = quote.get('open', 0)
+    pnl_pct = (current_price / buy_price - 1) * 100
+
+    res = {'skip': None, 'action': None, 'action_rec': None,
+           'blocked': False, 'missed': None, 'state_changed': False}
+
+    # trailing模式: 更新持有期peak(买入日的冲高不计入, 与回测T+1语义一致)
+    # peak_sod=日初peak(今日首次检查前的存量peak), 区间触及判定用它——
+    # 挂单语义: 当日低点发生时, 盘中新高抬升的触发线可能尚不存在
+    if sell_mode == 'trailing' and today > pos.get('buy_date', today):
+        if pos.get('peak_date') != today:
+            pos['peak_sod'] = pos.get('peak_price', buy_price)
+            pos['peak_date'] = today
+            res['state_changed'] = True
+        old_peak = pos.get('peak_price', buy_price)
+        new_peak = max(old_peak, today_high, current_price)
+        if new_peak > old_peak:
+            pos['peak_price'] = round(new_peak, 3)
+            res['state_changed'] = True
+
+    # T+1: 买入当日不可卖出, 只展示
+    if pos.get('buy_date', '') == today:
+        print(f"\n  持仓(T+0禁卖): {code} {name} [{strategy_name}] "
+              f"浮盈{pnl_pct:+.1f}% | 当前{current_price:.2f}")
+        res['skip'] = 'T0'
+        return res
+
+    # 区间判定适用条件: 行情含有效当日open/low(竞价期或历史回溯路径
+    # 可能缺失→退回快照比价); T+0持仓已在上面跳过, 当日区间必属持有期
+    use_range = today_open > 0 and today_low > 0
+
+    # 判断动作(区间触及判定, 回测语义: 条件单全程挂着, 盘中触及即成交)
+    # 语义卖价: 开盘已越过触发价→按开盘价(跳空击穿), 否则按触发价(盘中击穿)
+    action = None
+    sell_price = current_price
+    missed = None  # 错过的触发: 盘中已触及但现价已脱离触发区 → 只告警不补记
+    if sell_mode == 'timed':
+        # Task#36(B2-A): 定时了结, 无盘中TP/SL/peak。到点(sell_at)按现价卖出;
+        # daemon 10s轮询到点即触发, cron 10:31班兜底同走此分支;
+        # 跨日未卖(跌停封死顺延/停牌)→ 之后任意检查即刻卖出(尽快, =回测deferred)。
+        # quote['_hm']可注入模拟时刻(测试模式), 缺省用当前真实时刻。
+        due = pos.get('sell_at') or {}
+        due_date = due.get('date') or expire_date
+        due_time = due.get('time') or '10:30'
+        now_hm = quote.get('_hm') or datetime.now().strftime('%H:%M')
+        if today > due_date or (today == due_date and now_hm >= due_time):
+            action = 'expired'
+            sell_price = current_price
+            print(f"\n  ★ 定时卖出: {code} {name} [{strategy_name}] "
+                  f"定时点{due_date} {due_time} 现价{current_price:.2f} "
+                  f"盈亏{pnl_pct:+.1f}%")
+        else:
+            print(f"\n  持仓(定时): {code} {name} [{strategy_name}] "
+                  f"浮盈{pnl_pct:+.1f}% | 当前{current_price:.2f} "
+                  f"定时卖出:{due_date} {due_time}")
+    elif sell_mode == 'trailing':
+        peak_price = pos.get('peak_price', buy_price)
+        peak_sod = pos.get('peak_sod', peak_price)
+        # 日初挂单触发线: max(硬SL, 日初peak回落线)
+        trigger_sod = sl_price
+        if peak_sod > buy_price:
+            trigger_sod = max(trigger_sod,
+                              peak_sod - buy_price * trailing_pp / 100.0)
+        # 当前触发线(含今日新高抬升后的回落线): 快照比价用
+        trigger_now = sl_price
+        if peak_price > buy_price:
+            trigger_now = max(trigger_now,
+                              peak_price - buy_price * trailing_pp / 100.0)
+
+        range_touched = use_range and today_low <= trigger_sod
+        if current_price <= trigger_now:
+            # 现价仍处触发区 → 立即可执行
+            if range_touched and current_price <= trigger_sod:
+                # 日初挂单线盘中已触及且现价未回升到线上 → 挂单语义已成交,
+                # 按语义价记录(开盘击穿按开盘价, 盘中击穿按触发价)
+                sell_price = (today_open if today_open < trigger_sod
+                              else trigger_sod)
+                ref_trigger = trigger_sod
+            else:
+                # 盘中新高抬升后的回落线实时触发(或无区间数据) → 按现价卖出
+                sell_price = current_price
+                ref_trigger = trigger_now
+            action = ('stop_loss' if sell_price <= sl_price
+                      else 'trailing_stop')
+            label = '止损' if action == 'stop_loss' else '移动止盈'
+            print(f"\n  ★ {label}: {code} {name} [{strategy_name}] "
+                  f"当日low{today_low:.2f}/现价{current_price:.2f} "
+                  f"触发线{ref_trigger:.2f} "
+                  f"语义卖价{sell_price:.2f} "
+                  f"盈亏{(sell_price / buy_price - 1) * 100:+.1f}%")
+        elif range_touched:
+            # 日初线盘中已被击穿但现价已回升到当前触发线之上 → 错过的触发,
+            # 只告警不补记(今天实际没卖)
+            missed = {'trigger': trigger_sod,
+                      'sem_price': (today_open if today_open < trigger_sod
+                                    else trigger_sod),
+                      'kind': ('止损' if trigger_sod <= sl_price
+                               else '移动止盈')}
+        elif today >= expire_date:
+            action = 'expired'
+            print(f"\n  ★ 到期: {code} {name} [{strategy_name}] "
+                  f"到期{expire_date} 浮盈{pnl_pct:+.1f}%")
+        else:
+            print(f"\n  持仓: {code} {name} [{strategy_name}] "
+                  f"浮盈{pnl_pct:+.1f}% | 当前{current_price:.2f} "
+                  f"高点:{peak_price:.2f} 回落卖:{trigger_now:.2f} "
+                  f"SL:{sl_price:.2f} 到期:{expire_date}")
+    else:
+        # fixed: SL优先(保守), 再TP
+        # AM离场通道(Task#205 expam35): weak_buy仓(弱市日买入的S2)到期日
+        # 以开盘价gap先判TP/SL再到期, 语义对齐回测QAExpAM(D+2首hour以
+        # open判: open>=TP→take_profit, open<=SL→stop_loss, 否则expired,
+        # 均按开盘价为语义卖价)。旧仓无weak_buy字段=false走下方旧逻辑。
+        # 铁律兜底: 任何异常→降级回旧到期/触线逻辑+ERROR日志。
+        am_action = None
+        try:
+            if pos.get('weak_buy') and today >= expire_date:
+                _o = today_open if today_open > 0 else current_price
+                if tp_price and _o >= tp_price:
+                    am_action = 'take_profit'
+                elif _o <= sl_price:
+                    am_action = 'stop_loss'
+                else:
+                    am_action = 'expired'
+                sell_price = _o
+        except Exception as e:
+            am_action = None
+            sell_price = current_price
+            print(f"    [ERROR][AM离场] {code} 判定异常({e!r}), "
+                  f"降级旧到期逻辑")
+        sl_touched = (use_range and today_low <= sl_price)
+        tp_touched = (tp_price and use_range and today_high >= tp_price)
+        if am_action:
+            action = am_action
+            _lbl = {'take_profit': '止盈', 'stop_loss': '止损',
+                    'expired': '到期'}[am_action]
+            print(f"\n  ★ AM离场({_lbl}): {code} {name} [{strategy_name}] "
+                  f"弱市仓到期{expire_date} 开盘{sell_price:.2f} "
+                  f"gap判TP/SL→{am_action} "
+                  f"盈亏{(sell_price / buy_price - 1) * 100:+.1f}%")
+        elif current_price <= sl_price or sl_touched:
+            if current_price <= sl_price:
+                action = 'stop_loss'
+                sell_price = ((today_open if today_open < sl_price
+                               else sl_price) if sl_touched
+                              else current_price)
+                print(f"\n  ★ 止损: {code} {name} [{strategy_name}] "
+                      f"当日low{today_low:.2f}/现价{current_price:.2f} "
+                      f"<= SL{sl_price:.2f} 语义卖价{sell_price:.2f} "
+                      f"亏损{(sell_price / buy_price - 1) * 100:.1f}%")
+            else:
+                missed = {'trigger': sl_price,
+                          'sem_price': (today_open if today_open < sl_price
+                                        else sl_price),
+                          'kind': '止损'}
+        elif tp_price and (current_price >= tp_price or tp_touched):
+            if current_price >= tp_price:
+                action = 'take_profit'
+                sell_price = ((today_open if today_open > tp_price
+                               else tp_price) if tp_touched
+                              else current_price)
+                print(f"\n  ★ 止盈: {code} {name} [{strategy_name}] "
+                      f"当日high{today_high:.2f}/现价{current_price:.2f} "
+                      f">= TP{tp_price:.2f} 语义卖价{sell_price:.2f} "
+                      f"盈利{(sell_price / buy_price - 1) * 100:+.1f}%")
+            else:
+                missed = {'trigger': tp_price,
+                          'sem_price': (today_open if today_open > tp_price
+                                        else tp_price),
+                          'kind': '止盈'}
+        elif today >= expire_date:
+            action = 'expired'
+            print(f"\n  ★ 到期: {code} {name} [{strategy_name}] "
+                  f"到期{expire_date} 浮盈{pnl_pct:+.1f}%")
+        else:
+            tp_str = f"{tp_price:.2f}" if tp_price else '无'
+            print(f"\n  持仓: {code} {name} [{strategy_name}] "
+                  f"浮盈{pnl_pct:+.1f}% | 当前{current_price:.2f} "
+                  f"TP:{tp_str} SL:{sl_price:.2f} 到期:{expire_date}")
+
+    # 到期日与错过触发重叠时, 到期强平优先(不能拖过到期日)
+    if missed and today >= expire_date:
+        action = 'expired'
+        missed = None
+        print(f"\n  ★ 到期: {code} {name} [{strategy_name}] "
+              f"到期{expire_date} 浮盈{pnl_pct:+.1f}%")
+
+    if action:
+        # 框架级兜底: 已封跌停 → 卖单排队卖不掉, 顺延下次检查(到期强平同理)
+        # Task#286可卖性闸门增强: ①limit_prices舍入修复后跌停价逐分精确;
+        # ②盘口二次确认——跌停价上买一仍有承接(bid1_vol>0)时卖单可真实
+        # 成交, 按跌停价(现价)即卖; 仅"现价触跌停且买一空"=封死才顺延;
+        # 盘口缺失(测试/历史回溯路径)保守顺延。开板(现价>跌停价)后
+        # 后续轮次自动走下方else分支按原路径语义真卖。
+        preclose = quote.get('preclose', 0)
+        if trading_rules.is_at_limit_down(
+                code, current_price, preclose,
+                is_st=trading_rules.is_st_name(name)):
+            bid1_vol = quote.get('bid1_vol') or 0
+            if bid1_vol > 0:
+                # 跌停价上买盘有承接 → 可卖, 成交价保守取跌停价(现价)
+                sell_price = current_price
+                print(f"    [闸门放行] {code} {name} 现价{current_price:.2f}"
+                      f"触跌停但买一有承接({bid1_vol:.0f}手), 按跌停价卖出")
+                res['action_rec'] = {
+                    'code': code,
+                    'name': name,
+                    'strategy': strategy_name,
+                    'action': action,
+                    'current_price': current_price,
+                    'sell_price': round(sell_price, 2),
+                    'pnl_pct': round((sell_price / buy_price - 1) * 100, 2),
+                }
+            else:
+                print(f"    [框架拦截] {code} {name} 当前{current_price:.2f}"
+                      f"已跌停且买一空(封死), 卖单无法成交, 顺延下次检查")
+                res['blocked'] = True
+        else:
+            res['action_rec'] = {
+                'code': code,
+                'name': name,
+                'strategy': strategy_name,
+                'action': action,
+                'current_price': current_price,
+                'sell_price': round(sell_price, 2),
+                'pnl_pct': round((sell_price / buy_price - 1) * 100, 2),
+            }
+    res['action'] = action
+    res['missed'] = missed
+    return res
+
+
+def process_missed_alert(pos: dict, missed: dict, quote: dict, today: str,
+                         persist: bool = True) -> bool:
+    """错过的触发: 盘中已触及触发价但现价已回到安全区。今天实际没卖,
+    不自动补记卖出, 显著告警+企微通知, 等人工决策。幂等: 同日同触发只告警一次。
+    persist=False(测试模式)不落幂等标记不发通知。返回是否有状态变更需落盘。
+    """
+    code = pos['code']
+    name = pos['name']
+    buy_price = pos['buy_price']
+    strategy_name = pos.get('strategy', '')
+    expire_date = pos['expire_date']
+    current_price = quote['price']
+    today_low = quote.get('low', 0)
+    today_open = quote.get('open', 0)
+    pnl_pct = (current_price / buy_price - 1) * 100
+
+    alert_key = f"{today}:{missed['kind']}:{missed['trigger']:.2f}"
+    sem_pnl = (missed['sem_price'] / buy_price - 1) * 100
+    if pos.get('missed_alert_key') == alert_key:
+        print(f"\n  ⚠ 错过的触发(已告警, 幂等跳过): {code} {name} "
+              f"当日low{today_low:.2f}触及{missed['kind']}线"
+              f"{missed['trigger']:.2f}, 现价{current_price:.2f} "
+              f"等人工决策")
+        return False
+    alert_msg = (
+        f"⚠️【错过的触发-需人工决策】\n"
+        f"• {pos.get('slot_id','?')} {name}({code}) "
+        f"[{strategy_name}]\n"
+        f"  该仓按规则应已于{'开盘' if missed['sem_price'] == today_open else '盘中'}"
+        f"卖出{missed['sem_price']:.2f}"
+        f"({missed['kind']}线{missed['trigger']:.2f}已被"
+        f"当日{'低点' if missed['kind'] != '止盈' else '高点'}击穿), "
+        f"实盘未触发\n"
+        f"  当前{current_price:.2f}(浮盈{pnl_pct:+.2f}%), "
+        f"语义卖价对应盈亏{sem_pnl:+.2f}%\n"
+        f"  建议人工决策: ①立即卖出锁定{pnl_pct:+.2f}%浮盈 "
+        f"②继续持有至到期{expire_date}")
+    print(f"\n  {'!' * 56}")
+    for _line in alert_msg.split('\n'):
+        print(f"  {_line}")
+    print(f"  {'!' * 56}")
+    if persist:
+        pos['missed_alert_key'] = alert_key
+        try:
+            from realtime.notify import send_text
+            send_text(alert_msg)
+        except Exception as e:
+            print(f"  [notify] 告警通知发送失败(非致命): {e}")
+        return True
+    return False
+
+
+def process_blocked_alert(pos: dict, quote: dict, today: str,
+                          persist: bool = True) -> bool:
+    """跌停封死顺延(Task#286): 卖出动作被可卖性闸门拦截, 通知一次(当日去重)。
+
+    不记成交不改账, 仅落幂等标记+推送"跌停封死顺延"通知; 后续每轮检查
+    开板(现价>跌停价或买一有承接)即按原路径语义真卖。
+    persist=False(测试模式)不落标记不发通知。返回是否有状态变更需落盘。"""
+    code = pos['code']
+    name = pos['name']
+    alert_key = f"{today}:limitdown_defer"
+    if pos.get('limitdown_defer_key') == alert_key:
+        return False
+    current_price = quote['price']
+    pnl_pct = (current_price / pos['buy_price'] - 1) * 100
+    alert_msg = (
+        f"⏸️【跌停封死·卖出顺延】\n"
+        f"• {pos.get('slot_id','?')} {name}({code}) "
+        f"[{pos.get('strategy','')}]\n"
+        f"  卖出条件已触发, 但当前{current_price:.2f}跌停封死(买一空), "
+        f"卖单无法成交\n"
+        f"  浮盈{pnl_pct:+.2f}% | 不记成交, 持仓保留, 开板即卖; "
+        f"全天封死则顺延至下一交易日")
+    print(f"    [顺延通知] {code} {name} 跌停封死卖出顺延(当日首次, 已推送)")
+    if persist:
+        pos['limitdown_defer_key'] = alert_key
+        try:
+            from realtime.notify import send_text, send_qywx
+            send_text(alert_msg)
+            send_qywx(alert_msg)
+        except Exception as e:
+            print(f"  [notify] 顺延通知发送失败(非致命): {e}")
+        return True
+    return False
+
+
+def close_position_locked(data: dict, a: dict, today: str,
+                          owner: str = 'cron',
+                          batch_codes: list = None) -> bool:
+    """按action记录平仓一笔(动态再平衡: 资金回现金池+企微通知+移closed_trades)。
+
+    selling_locked幂等锁: 先到者(daemon或cron)锁定, 他方跳过, 防双写;
+    已closed/已被他方锁定的直接返回False。调用方负责最终save_positions。
+    batch_codes: 同批卖出标的代码列表(可选, Task#185), 仅透传给卖出通知
+    的持仓栏渲染(通知先于落账save, 持仓栏需显式剔除本笔及同批已卖标的),
+    不影响任何落账逻辑。
+    """
+    account = data['account']
+    for pos in data['positions']:
+        if pos['code'] == a['code'] and pos['status'] == 'holding':
+            lock = pos.get('selling_locked')
+            if lock and lock.get('owner') != owner:
+                print(f"  [幂等锁] {pos['code']} {pos.get('name','')} "
+                      f"已被{lock.get('owner')}于{lock.get('ts')}锁定卖出, "
+                      f"跳过防双写")
+                return False
+            pos['selling_locked'] = {
+                'owner': owner,
+                'ts': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+            }
+            pos['status'] = 'closed'
+            pos['sell_date'] = today
+            pos['sell_price'] = a['sell_price']
+            pos['sell_reason'] = a['action']
+            pos['pnl_pct'] = a['pnl_pct']
+
+            # 计算盈亏金额并更新account(先取整再入账, 与pnl_amount记录一致, 守恒断言可对平)
+            buy_amount = pos.get('buy_amount', account['initial_capital'] / 5)
+            pnl_amount = round(buy_amount * (a['pnl_pct'] / 100.0), 2)
+            pos['pnl_amount'] = pnl_amount
+
+            proceeds = buy_amount + pnl_amount
+            account['cash'] += proceeds
+            account['realized_pnl'] += pnl_amount
+
+            # 移到closed_trades(保留selling_locked作平仓归属审计)
+            closed_record = pos.copy()
+            del closed_record['status']
+            data['closed_trades'].append(closed_record)
+
+            # 发送卖出通知
+            try:
+                from realtime.notify import notify_sell
+                buy_date_str = pos.get('buy_date', '')
+                _hold_days = 0
+                if buy_date_str:
+                    try:
+                        _d1 = datetime.strptime(buy_date_str, '%Y-%m-%d')
+                        _d2 = datetime.strptime(today, '%Y-%m-%d')
+                        _hold_days = (_d2 - _d1).days
+                    except Exception:
+                        _hold_days = 0
+                notify_sell(
+                    date_str=today,
+                    time_str=datetime.now().strftime('%H:%M:%S'),
+                    stock_name=pos.get('name', ''),
+                    stock_code=pos['code'],
+                    sell_price=a['sell_price'],
+                    buy_price=pos['buy_price'],
+                    hold_days=_hold_days,
+                    sold_codes=batch_codes,
+                )
+            except Exception as e:
+                print(f"[position_tracker] 卖出通知发送失败(非致命): {e}")
+            return True
+    return False
+
+
+# =============================================================================
+# 核心: 检查持仓
+# =============================================================================
+
+def check_positions(test_date: str = None, hour: int = None, auto_close: bool = False):
+    """检查所有持仓, 输出止盈/止损/到期提醒。auto_close=True时自动平仓。"""
+    data = load_positions()
+    holdings = [p for p in data['positions'] if p['status'] == 'holding']
+
+    if not holdings:
+        print("\n[持仓跟踪] 当前无持仓")
+        return
+
+    today = test_date or datetime.now().strftime('%Y-%m-%d')
+    current_hour = hour or _guess_current_hour()
+    print(f"\n{'=' * 60}")
+    print(f"  持仓跟踪 ({today} Hour={current_hour}) {'[AUTO-CLOSE]' if auto_close else ''}")
+    print(f"{'=' * 60}")
+
+    # 获取当前行情(price/open/high/low/preclose, 测试模式与实盘同构)
+    codes = [p['code'] for p in holdings]
+    if test_date:
+        quotes = fetch_test_prices(codes, test_date, hour)
+        # timed持仓判定需要"当前时刻": 测试模式按hour收盘时刻注入模拟时刻,
+        # hourN_close价格与该时刻语义对齐(hour1_close即10:30价, =B2-A定时点)
+        if hour in (1, 2, 3, 4):
+            hm = {1: '10:30', 2: '11:30', 3: '14:00', 4: '15:00'}[hour]
+            for q in quotes.values():
+                q['_hm'] = hm
+    else:
+        quotes = fetch_realtime_quotes(codes)
+    prices = {c: q['price'] for c, q in quotes.items()}
+
+    actions = []
+    state_changed = False  # peak/日初peak/告警标记等持久化字段有变更
+    for pos in holdings:
+        code = pos['code']
+        name = pos['name']
+        strategy_name = pos.get('strategy', '')
+        expire_date = pos['expire_date']
+
+        if code not in prices:
+            # 对于过期仓位，尝试用DB回溯查找卖出价
+            if today >= expire_date and auto_close:
+                sell_price = _find_historical_sell_price(pos, today)
+                if sell_price:
+                    prices[code] = sell_price
+                    quotes[code] = {'price': sell_price, 'high': sell_price}
+                else:
+                    print(f"\n  {code} {name} [{strategy_name}]: 无行情且无法回溯")
+                    continue
+            else:
+                print(f"\n  {code} {name} [{strategy_name}]: 未获取到行情")
+                continue
+
+        # 共享判定(evaluate_position会原地更新pos的peak字段并打印状态行)
+        res = evaluate_position(pos, quotes[code], today)
+        if res['state_changed']:
+            state_changed = True
+        if res['missed']:
+            if process_missed_alert(pos, res['missed'], quotes[code], today,
+                                    persist=not test_date):
+                state_changed = True
+        if res.get('blocked'):
+            # Task#286: 跌停封死顺延通知(当日去重), 不记成交不改账
+            if process_blocked_alert(pos, quotes[code], today,
+                                     persist=not test_date):
+                state_changed = True
+        if res['action_rec']:
+            actions.append(res['action_rec'])
+
+    # peak/日初peak/告警标记更新即使无卖出动作也要落盘(下次检查依赖);
+    # 测试模式不写盘; auto-close路径稍后还会save(原子写, 重复无害)
+    if state_changed and not test_date:
+        save_positions(data)
+
+    if actions:
+        print(f"\n  --- 需要操作: {len(actions)} 笔 ---")
+        for a in actions:
+            print(f"  [{a['action']}] {a['code']} {a['name']} → 卖出@{a['sell_price']:.2f}")
+
+        if auto_close:
+            # 自动平仓 (动态再平衡: 资金回到现金池)
+            # 重新加载最新持仓再平仓: 缩小与daemon的读-改-写双写窗口
+            # (主防线是daemon心跳跳过, selling_locked先到者锁定是二道锁)
+            data = load_positions()
+            account = data['account']
+            closed_count = 0
+            # Task#185: 同批卖出代码集→卖出通知持仓栏剔除用(仅影响通知渲染)
+            batch = [x['code'] for x in actions]
+            for a in actions:
+                if close_position_locked(data, a, today, owner='cron',
+                                         batch_codes=batch):
+                    closed_count += 1
+
+            if closed_count:
+                # 清理positions中已closed的
+                data['positions'] = [p for p in data['positions']
+                                     if p.get('status') != 'closed']
+                account['realized_pnl'] = round(account['realized_pnl'], 2)
+                account['cash'] = round(account['cash'], 2)
+                save_positions(data)
+                print(f"\n  [AUTO-CLOSE] 已自动平仓 {closed_count} 笔")
+                print(f"  现金: ¥{account['cash']:,.0f} | 累计PnL: ¥{account['realized_pnl']:+,.0f}")
+            else:
+                print(f"\n  [AUTO-CLOSE] 0笔平仓(持仓已被守护进程锁定/平仓)")
+        else:
+            print(f"  确认卖出: python realtime/position_tracker.py confirm-sell CODE PRICE")
+
+    print(f"\n{'=' * 60}")
+
+
+def _find_historical_sell_price(pos: dict, today: str) -> float:
+    """用DB数据回溯查找持仓应在哪天以什么价格卖出(与回测挂单语义一致)。
+
+    fixed模式: T+1后逐小时: SL(低越过以SL价), TP(高越过以TP价), 同小时保守SL优先;
+    trailing模式: peak用已完成小时+当前小时open, 触发价=max(trailing, 硬SL);
+    到期日按H4_close强平。
+    """
+    code = pos['code']
+    buy_date = pos['buy_date']
+    buy_price = pos.get('buy_price', 0)
+    tp_price = pos.get('tp_price')
+    sl_price = pos['sl_price']
+    expire_date = pos['expire_date']
+    sell_mode = pos.get('sell_mode', 'fixed')
+    trailing_pp = pos.get('trailing_pp') or 2.0
+    peak = pos.get('peak_price', buy_price)
+
+    conn = sqlite3.connect(DATA_DB)
+    cur = conn.execute("""
+        SELECT date, open, close,
+               hour1_open, hour1_high, hour1_low, hour1_close,
+               hour2_open, hour2_high, hour2_low, hour2_close,
+               hour3_open, hour3_high, hour3_low, hour3_close,
+               hour4_open, hour4_high, hour4_low, hour4_close
+        FROM stock_kline WHERE code = ? AND date > ? AND date <= ?
+        ORDER BY date
+    """, (code, buy_date, today))
+
+    try:
+        for row in cur.fetchall():
+            date = row[0]
+            day_close = row[2]
+            hours = [row[3 + i * 4: 7 + i * 4] for i in range(4)]  # (o,h,l,c)×4
+
+            if sell_mode == 'timed':
+                # Task#36: 定时点(sell_at)日按hour1_close了结(=回测d2h1_close);
+                # 之后的日子任意有效小时开盘价尽快卖出(deferred语义)
+                due_date = (pos.get('sell_at') or {}).get('date') or expire_date
+                if date < due_date:
+                    continue
+                if date == due_date:
+                    h1 = hours[0]
+                    p = h1[3] or h1[0]  # hour1_close, 缺则hour1_open
+                    if p and p > 0:
+                        return p
+                    continue  # 当日停牌/无H1数据 → 顺延下一日
+                for h_open, _h, _l, _c in hours:
+                    if h_open and h_open > 0:
+                        return h_open
+                continue
+
+            for h_open, h_high, h_low, h_close in hours:
+                if not h_open or h_open <= 0:
+                    continue
+
+                if sell_mode == 'trailing':
+                    # bar开始时已知peak(含当前bar open)
+                    if h_open > peak:
+                        peak = h_open
+                    trigger = sl_price
+                    if buy_price > 0 and peak > buy_price:
+                        trigger = max(trigger,
+                                      peak - buy_price * trailing_pp / 100.0)
+                    if h_open <= trigger:
+                        return h_open
+                    if h_low and h_low > 0 and h_low <= trigger:
+                        return trigger
+                    if h_high and h_high > peak:
+                        peak = h_high
+                else:
+                    # fixed: SL优先(保守), 再TP
+                    if h_open <= sl_price:
+                        return h_open
+                    if tp_price and h_open >= tp_price:
+                        return h_open
+                    if h_low and h_low > 0 and h_low <= sl_price:
+                        return sl_price
+                    if tp_price and h_high and h_high > 0 and h_high >= tp_price:
+                        return tp_price
+
+            # 到期日强制卖出 - H4收盘
+            if date >= expire_date:
+                sell_p = hours[3][3] or day_close  # hour4_close or day_close
+                return sell_p
+    finally:
+        conn.close()
+    return None
+
+
+def _guess_current_hour() -> int:
+    """根据当前时间推测trading hour。"""
+    now = datetime.now()
+    h = now.hour
+    m = now.minute
+    if h < 10:
+        return 1
+    elif h < 11 or (h == 11 and m <= 30):
+        return 2
+    elif h < 14:
+        return 3
+    else:
+        return 4
+
+
+# =============================================================================
+# 命令: confirm-buy
+# =============================================================================
+
+def confirm_buy():
+    """确认买入pending记录，转入正式持仓。使用动态再平衡分配资金。"""
+    pending = load_pending()
+    if not pending:
+        print("[position_tracker] 无待确认的买入记录")
+        return
+
+    data = load_positions()
+    account = data['account']
+
+    print(f"\n确认买入以下股票 (动态再平衡模式):")
+    print(f"  当前总净值: ¥{account['total_nav']:,.0f} | 可用现金: ¥{account['cash']:,.0f}")
+
+    n_confirmed = 0
+    for p in pending:
+        # 动态再平衡: 每slot金额 = total_nav / 5 × 冰点系数(Task#68, 默认1.0)
+        scale = p.get('position_scale') or 1.0
+        buy_amount = round(get_buy_amount(data, scale=scale), 2)   # 取整后扣款, 与buy_amount记录一致
+        slot_id = p.get('slot_id', '?')
+        strategy = p.get('strategy', '?')
+
+        if buy_amount < 10000:
+            print(f"  [{slot_id}:{strategy}] {p['code']} {p['name']} - 跳过(资金不足)")
+            continue
+
+        # V-C杜绝先买后卖硬断言(用户裁决③): 买入时点现金必须≥买入额
+        # (不计当日未来回款), 违反=拒单+告警, 绝不透支/缩水。
+        # 正常不应触发(morning_decision.allocate_idle_slots已按空闲槽×现金
+        # 预算分配), 触发=分配层与账本不一致的tripwire。
+        if VC_DYNAMIC_SLOTS and buy_amount > account['cash'] + 0.01:
+            msg = (f"[VC_CASH_GUARD] 拒单: [{slot_id}:{strategy}] {p['code']} "
+                   f"{p['name']} 买入额¥{buy_amount:,.2f} > 现金"
+                   f"¥{account['cash']:,.2f} (杜绝先买后卖, 不计当日未来回款)")
+            print(f"  🚨 {msg}")
+            try:
+                with open(SCHEDULER_ALERT_LOG, 'a', encoding='utf-8') as f:
+                    f.write(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] "
+                            f"🚨 {msg}\n")
+            except OSError:
+                pass
+            continue
+
+        if p.get('sell_mode') == 'timed':
+            sa = p.get('sell_at') or {}
+            sell_desc = (f"定时卖出 {sa.get('date','?')} {sa.get('time','?')}"
+                         f"(无盘中TP/SL)")
+        elif p.get('sell_mode') == 'trailing':
+            sell_desc = (f"移动止盈(回落{p.get('trailing_pp') or 2.0}pp) "
+                         f"SL={p['sl_price']:.2f}")
+        else:
+            tp_str = f"{p['tp_price']:.2f}" if p.get('tp_price') else '无'
+            sell_desc = f"TP={tp_str} SL={p['sl_price']:.2f}"
+        print(f"  [{slot_id}:{strategy}] {p['code']} {p['name']} "
+              f"买入@{p['buy_price']:.2f} 金额¥{buy_amount:,.0f}"
+              f"{f'(冰点×{scale})' if scale != 1.0 else ''} "
+              f"{sell_desc}")
+
+        # 扣减现金
+        account['cash'] -= buy_amount
+
+        data['positions'].append({
+            'code': p['code'],
+            'name': p['name'],
+            'strategy': strategy,
+            'slot_id': slot_id,
+            'buy_date': p['buy_date'],
+            'buy_price': p['buy_price'],
+            'buy_amount': round(buy_amount, 2),
+            'tp_price': p.get('tp_price'),
+            'sl_price': p['sl_price'],
+            'sell_mode': p.get('sell_mode', 'fixed'),
+            'trailing_pp': p.get('trailing_pp'),
+            'sell_at': p.get('sell_at'),        # timed用: {'date','time'} 定时卖出点
+            'peak_price': p['buy_price'],   # trailing用: 持有期最高价(含买入价)
+            'expire_date': p['expire_date'],
+            # G2确认三参随持仓落盘: 2026-07-31批准(APPROVAL_G2_MINUTE)
+            # (pending→持仓, 缺省全关; intraday_monitor据此分路)
+            'confirm_bars': p.get('confirm_bars', 0),
+            'confirm_before': p.get('confirm_before', ''),
+            'confirm_scope': p.get('confirm_scope', 'trailing'),
+            # weak_buy标记(Task#205 expam35): 弱市日买入的S2仓, 到期日
+            # 早盘AM离场(evaluate_position gap判TP/SL); 旧仓无字段=false
+            'weak_buy': bool(p.get('weak_buy', False)),
+            'limitup_cnt_d1': p.get('limitup_cnt_d1'),
+            'status': 'holding',
+        })
+        n_confirmed += 1
+
+    save_positions(data)
+    save_pending([])
+    print(f"\n[OK] 已确认 {n_confirmed}/{len(pending)} 笔买入，持仓已更新"
+          + (f"(跳过/拒单{len(pending) - n_confirmed}笔, 见上方日志)"
+             if n_confirmed < len(pending) else ""))
+    print(f"  更新后现金: ¥{account['cash']:,.0f} | 总净值: ¥{account['total_nav']:,.0f}")
+
+
+# =============================================================================
+# 命令: confirm-sell
+# =============================================================================
+
+def confirm_sell(code: str, sell_price: float):
+    """确认卖出。卖出后资金回到现金池，更新realized_pnl。"""
+    data = load_positions()
+    account = data['account']
+    found = False
+
+    for pos in data['positions']:
+        if pos['code'] == code and pos['status'] == 'holding':
+            pos['status'] = 'closed'
+            pos['sell_date'] = datetime.now().strftime('%Y-%m-%d')
+            pos['sell_price'] = sell_price
+            pos['pnl_pct'] = round((sell_price / pos['buy_price'] - 1) * 100, 2)
+
+            # 计算实际盈亏金额(先取整再入账, 与pnl_amount记录一致)
+            buy_amount = pos.get('buy_amount', account['initial_capital'] / 5)
+            pnl_amount = round(buy_amount * (pos['pnl_pct'] / 100.0), 2)
+            pos['pnl_amount'] = pnl_amount
+
+            # 更新account: 卖出资金回到现金池
+            proceeds = buy_amount + pnl_amount
+            account['cash'] += proceeds
+            account['realized_pnl'] += pnl_amount
+            account['realized_pnl'] = round(account['realized_pnl'], 2)
+            account['cash'] = round(account['cash'], 2)
+
+            # 移到closed_trades
+            closed_record = pos.copy()
+            del closed_record['status']
+            data['closed_trades'].append(closed_record)
+
+            pnl = pos['pnl_pct']
+            print(f"[OK] 已卖出: {code} {pos['name']} [{pos.get('strategy','')}] "
+                  f"买入{pos['buy_price']:.2f} → 卖出{sell_price:.2f} 收益{pnl:+.2f}%")
+            print(f"  盈亏金额: ¥{pnl_amount:+,.0f} | "
+                  f"累计已实现PnL: ¥{account['realized_pnl']:+,.0f}")
+            print(f"  下次每slot买入: ¥{(account['cash'] + sum(p.get('buy_amount', 0) for p in data['positions'] if p.get('status')=='holding')) / 5:,.0f}")
+            found = True
+            break
+
+    if not found:
+        print(f"[ERROR] 未找到 {code} 的持仓记录")
+        return
+
+    # 从positions中移除已closed的
+    data['positions'] = [p for p in data['positions'] if p.get('status') != 'closed']
+    save_positions(data)
+
+
+# =============================================================================
+# 命令: add
+# =============================================================================
+
+def add_position(code: str, name: str, strategy: str, slot_id: str,
+                 buy_price: float, tp_price: float, sl_price: float, expire_date: str):
+    """直接添加持仓 (使用动态再平衡分配资金)。"""
+    data = load_positions()
+    account = data['account']
+    buy_amount = get_buy_amount(data)
+
+    # 扣减现金
+    account['cash'] -= buy_amount
+    account['cash'] = round(account['cash'], 2)
+
+    data['positions'].append({
+        'code': code,
+        'name': name,
+        'strategy': strategy,
+        'slot_id': slot_id,
+        'buy_date': datetime.now().strftime('%Y-%m-%d'),
+        'buy_price': buy_price,
+        'buy_amount': round(buy_amount, 2),
+        'tp_price': tp_price,
+        'sl_price': sl_price,
+        'expire_date': expire_date,
+        'status': 'holding',
+    })
+    save_positions(data)
+    print(f"[OK] 已添加: {code} {name} [{slot_id}:{strategy}] "
+          f"@{buy_price:.2f} 金额¥{buy_amount:,.0f} TP={tp_price:.2f} SL={sl_price:.2f}")
+    print(f"  剩余现金: ¥{account['cash']:,.0f}")
+
+
+# =============================================================================
+# 命令: list
+# =============================================================================
+
+def list_positions():
+    """列出所有持仓。"""
+    data = load_positions()
+    account = data['account']
+    holdings = [p for p in data['positions'] if p.get('status') == 'holding']
+    closed = data.get('closed_trades', [])
+
+    print(f"\n{'=' * 60}")
+    print(f"  持仓列表 (动态再平衡模式)")
+    print(f"{'=' * 60}")
+    print(f"  账户: 初始¥{account['initial_capital']:,.0f} | "
+          f"现金¥{account['cash']:,.0f} | "
+          f"已实现PnL¥{account['realized_pnl']:+,.0f} | "
+          f"总净值¥{account['total_nav']:,.0f}")
+    print(f"  下次买入: ¥{get_buy_amount(data):,.0f}/slot")
+
+    if holdings:
+        print(f"\n  --- 当前持仓 ({len(holdings)}只) ---")
+        for p in holdings:
+            slot = p.get('slot_id', '?')
+            amt = p.get('buy_amount', '?')
+            if p.get('sell_mode') == 'timed':
+                sa = p.get('sell_at') or {}
+                sell_desc = (f"定时卖出:{sa.get('date','?')} "
+                             f"{sa.get('time','?')}(无盘中TP/SL)")
+            elif p.get('sell_mode') == 'trailing':
+                sell_desc = (f"移动止盈(高点{p.get('peak_price', p['buy_price']):.2f}"
+                             f"回落{p.get('trailing_pp') or 2.0}pp) "
+                             f"SL:{p['sl_price']:.2f}")
+            else:
+                tp_str = f"{p['tp_price']:.2f}" if p.get('tp_price') else '无'
+                sell_desc = f"TP:{tp_str} SL:{p['sl_price']:.2f}"
+            print(f"  [{slot}] {p['code']} {p['name']} | 策略:{p['strategy']} "
+                  f"买入:{p['buy_price']:.2f} @{p['buy_date']} 金额:¥{amt}"
+                  f" | {sell_desc} 到期:{p['expire_date']}")
+    else:
+        print(f"\n  当前无持仓")
+
+    if closed:
+        print(f"\n  --- 已平仓 (最近10笔) ---")
+        for p in closed[-10:]:
+            pnl = p.get('pnl_pct', '?')
+            pnl_amt = p.get('pnl_amount', '?')
+            print(f"  [{p.get('slot_id','?')}] {p['code']} {p['name']} | "
+                  f"买{p['buy_price']:.2f}→卖{p.get('sell_price', '?')} "
+                  f"收益:{pnl}% (¥{pnl_amt})")
+
+    print(f"\n{'=' * 60}")
+
+
+# =============================================================================
+# 盘后日报 (Task#123: 15:01 auto-close cron班次接线 notify_daily_summary)
+# =============================================================================
+
+_DAILY_REPORT_MARK = os.path.join(PROJECT_ROOT, 'logs', 'realtime',
+                                  '.daily_report_sent')
+
+
+def _prev_close_map(codes: list, today: str) -> dict:
+    """从stocks.db(只读)取各股今日之前最近交易日收盘价 {code: prev_close}。
+
+    只读mode=ro打开且仅查date<today, 不依赖当日数据回补进度、
+    不干扰并行写入(daily_update链)。查不到的code不入map。
+    """
+    result = {}
+    try:
+        conn = sqlite3.connect(f'file:{DATA_DB}?mode=ro', uri=True)
+        for code in codes:
+            row = conn.execute(
+                "SELECT close FROM stock_kline WHERE code=? AND date<? "
+                "ORDER BY date DESC LIMIT 1", (code, today)).fetchone()
+            if row and row[0]:
+                result[code] = float(row[0])
+        conn.close()
+    except sqlite3.Error as e:
+        print(f"[盘后日报] 昨收查询失败(非致命): {e}")
+    return result
+
+
+def update_drawdown_boost_state(today: str, today_nav: float):
+    """盘后滚动更新 drawdown-boost 状态机(Task#205, t174 ENGINE_REPORT §8)。
+
+    盯市nav → data/drawdown_state.json (与Task#73回撤作战手册的
+    data/realtime/drawdown_state.json 是两个文件, 互不干扰):
+      peak = max(旧peak, 今日nav); dd = (peak - nav) / peak × 100
+      进入: 非boost态且 dd >= DRAWDOWN_BOOST_X(15%) → boost_active=true
+      退出: boost态且 nav回到峰值(dd <= 0) → boost_active=false
+    次日9:25 morning_decision.apply_drawdown_boost 读此状态(dd_{t-1}语义)。
+    铁律兜底: 文件缺失/损坏→以今日nav保守重建(boost_active=false起步);
+    任何异常只ERROR日志, 绝不影响日报/交易主链。幂等: 同nav重复调用无副作用。
+    """
+    try:
+        if not DRAWDOWN_BOOST_ENABLED:
+            return
+        if not today_nav or today_nav <= 0:
+            print(f"[boost状态] nav非法({today_nav}), 跳过更新")
+            return
+        st = {}
+        try:
+            with open(DRAWDOWN_BOOST_STATE_FILE, encoding='utf-8') as f:
+                st = json.load(f)
+            if not isinstance(st, dict):
+                st = {}
+        except (OSError, ValueError):
+            # 缺失/损坏 → 以今日nav保守重建(boost_active=false起步)
+            print(f"[boost状态] 状态文件缺失/损坏, 以今日nav保守重建")
+            st = {}
+        try:
+            old_peak = float(st.get('nav_peak') or 0)
+        except (TypeError, ValueError):
+            old_peak = 0.0
+        peak = max(old_peak, float(today_nav))
+        dd = (peak - today_nav) / peak * 100 if peak > 0 else 0.0
+        active = bool(st.get('boost_active', False))
+        if not active and dd >= DRAWDOWN_BOOST_X:
+            active = True
+            print(f"[boost状态] ★ 进入boost态: 回撤{dd:.2f}%>="
+                  f"{DRAWDOWN_BOOST_X}% → 次日非冰点日新开仓×1.5")
+        elif active and dd <= 0:
+            active = False
+            print(f"[boost状态] ★ 退出boost态: nav回到峰值¥{peak:,.2f}")
+        new_st = {
+            'nav_peak': round(peak, 2),
+            'nav_current': round(float(today_nav), 2),
+            'drawdown_pct': round(dd, 2),
+            'boost_active': active,
+            'updated_at': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+        }
+        tmp = DRAWDOWN_BOOST_STATE_FILE + '.tmp'
+        with open(tmp, 'w', encoding='utf-8') as f:
+            json.dump(new_st, f, ensure_ascii=False, indent=2)
+        os.replace(tmp, DRAWDOWN_BOOST_STATE_FILE)
+        print(f"[boost状态] {today} nav=¥{today_nav:,.2f} "
+              f"peak=¥{peak:,.2f} dd={dd:.2f}% boost_active={active}")
+    except Exception as e:
+        # 铁律: 状态更新异常绝不影响盘后日报/交易主链
+        print(f"[ERROR][boost状态] 更新异常(非致命): {e!r}")
+
+
+def send_daily_report_if_due(today: str, force: bool = False, note: str = ''):
+    """盘后日报: 15:00后auto-close首次运行时汇总当日交易并发企微通知。
+
+    幂等: 标记文件记当日日期, 同日只发一次(发送成功才落标记);
+    force=True跳过幂等检查允许重发(手工修正版用, note附到标题);
+    非交易日(无当日candidates文件, 与daemon自判交易日同口径)跳过。
+
+    今日收益口径(Task#126盯市mark-to-market, 账户级):
+      今日收益% = (今日收盘净值 - 昨日收盘净值) / 昨日收盘净值
+    分解为三部分贡献(每部分=金额差/昨日净值, 现金无贡献):
+      卖出贡献: 今日卖出笔, (卖出价-昨收)x股数 —— T+1下今日卖的必是昨日前
+        买入, 当日贡献基准是昨收而非买入价(买入价基准的pnl_pct是全周期
+        盈亏, 仅用于笔明细展示, 两基准严格分离)
+      续持贡献: 昨日已持有且今日未卖, (今收-昨收)x股数
+      新买贡献: 今日买入, (今收-买入价)x股数
+    数据源: 昨收=stocks.db stock_kline只读(date<today最近一条);
+    今收=腾讯实时接口(盘后返回即收盘价, 不依赖库内当日数据)。
+    昨日收盘净值由今日净值倒推: 昨净值=今净值(现金+持仓x今收)-三部分贡献金额
+    (positions.json无历史nav快照, 倒推与昨现金+昨持仓x昨收独立重构一致,
+    已手工交叉验证差<¥1)。
+    """
+    now = datetime.now()
+    if now.strftime('%H:%M') < '15:00':
+        return
+    cand_file = os.path.join(OUTPUT_DIR,
+                             f"candidates_{now.strftime('%Y%m%d')}.json")
+    if not os.path.exists(cand_file):
+        return
+    if not force:
+        try:
+            if os.path.exists(_DAILY_REPORT_MARK):
+                with open(_DAILY_REPORT_MARK, 'r') as f:
+                    if f.read().strip() == today:
+                        return  # 今日已发送
+        except OSError:
+            pass
+
+    try:
+        data = load_positions()
+        holdings = [p for p in data.get('positions', [])
+                    if p.get('status') == 'holding']
+        sold_today = [t for t in data.get('closed_trades', [])
+                      if t.get('sell_date') == today]
+
+        # 价格源: 昨收(卖出股+续持股需要), 今收(全部持仓股需要)
+        prev_closes = _prev_close_map(
+            [t['code'] for t in sold_today] +
+            [p['code'] for p in holdings if p.get('buy_date') != today], today)
+        from realtime.notify import _fetch_realtime_prices, notify_daily_summary
+        today_closes = _fetch_realtime_prices([p['code'] for p in holdings])
+
+        trades_log = []
+        # 当日买入(T+1下当日买入必仍在holding, 不会与卖出重复)
+        for p in holdings:
+            if p.get('buy_date') == today:
+                trades_log.append({'action': 'buy',
+                                   'name': p.get('name', ''),
+                                   'code': p.get('code', ''),
+                                   'price': p.get('buy_price', 0)})
+        # 当日卖出(笔明细仍用买入价基准的全周期pnl_pct)
+        sell_contrib = 0.0
+        for t in sold_today:
+            trades_log.append({'action': 'sell',
+                               'name': t.get('name', ''),
+                               'code': t.get('code', ''),
+                               'price': t.get('sell_price', 0),
+                               'pnl_pct': t.get('pnl_pct', 0)})
+            buy_price = t.get('buy_price', 0)
+            shares = (t.get('buy_amount', 0) / buy_price) if buy_price > 0 else 0
+            # 昨收缺失时退化为买入价基准(旧口径, 仅兼容数据缺口)
+            base = prev_closes.get(t['code'], buy_price)
+            sell_contrib += (t.get('sell_price', 0) - base) * shares
+
+        # 持仓浮动: 续持(昨收基准) + 新买(买入价基准); 同时累计今收市值
+        carry_contrib = 0.0
+        newbuy_contrib = 0.0
+        holding_mv = 0.0
+        for p in holdings:
+            buy_price = p.get('buy_price', 0)
+            if buy_price <= 0:
+                continue
+            shares = p.get('buy_amount', 0) / buy_price
+            if p.get('buy_date') == today:
+                # 今收缺失退化为买入价(贡献计0)
+                tc = today_closes.get(p['code'], buy_price)
+                newbuy_contrib += (tc - buy_price) * shares
+            else:
+                base = prev_closes.get(p['code'], buy_price)
+                tc = today_closes.get(p['code'], base)
+                carry_contrib += (tc - base) * shares
+            holding_mv += tc * shares
+
+        total_contrib = sell_contrib + carry_contrib + newbuy_contrib
+        account = data.get('account', {})
+        today_nav = account.get('cash', 0) + holding_mv
+        # drawdown-boost状态机盘后滚动(Task#205): 盯市nav落
+        # data/drawdown_state.json, 内部自兜底不影响日报主流程
+        update_drawdown_boost_state(today, today_nav)
+        prev_nav = today_nav - total_contrib  # 昨收净值=今净值倒推
+        if prev_nav <= 0:
+            prev_nav = account.get('initial_capital', 1000000)
+        today_pnl_pct = total_contrib / prev_nav * 100
+        breakdown = {
+            'realized_pct': round(sell_contrib / prev_nav * 100, 2),
+            'float_pct': round((carry_contrib + newbuy_contrib) /
+                               prev_nav * 100, 2),
+        }
+
+        ok = notify_daily_summary(today, trades_log, round(today_pnl_pct, 2),
+                                  breakdown=breakdown, note=note)
+        print(f"[盘后日报] {today} 交易{len(trades_log)}笔 "
+              f"今日收益(盯市){today_pnl_pct:+.2f}% "
+              f"[卖出{breakdown['realized_pct']:+.2f}% "
+              f"浮动{breakdown['float_pct']:+.2f}%] "
+              f"昨净值¥{prev_nav:,.2f} 今净值¥{today_nav:,.2f} "
+              f"发送{'成功' if ok else '失败'}")
+        if ok:
+            with open(_DAILY_REPORT_MARK, 'w') as f:
+                f.write(today)
+    except Exception as e:
+        # 日报失败不能影响交易链路(auto-close主流程)
+        print(f"[盘后日报] 发送异常(非致命): {e}")
+
+
+# =============================================================================
+# Main
+# =============================================================================
+
+def main():
+    if len(sys.argv) < 2:
+        cmd = 'check'
+    else:
+        cmd = sys.argv[1]
+
+    if cmd in ('check', 'auto-close'):
+        test_date = None
+        hour = None
+        auto_close = (cmd == 'auto-close')
+        for i, arg in enumerate(sys.argv[2:], 2):
+            if arg == '--test-date' and i < len(sys.argv) - 1:
+                test_date = sys.argv[i + 1]
+            elif arg.startswith('--test-date='):
+                test_date = arg.split('=', 1)[1]
+            elif arg == '--hour' and i < len(sys.argv) - 1:
+                hour = int(sys.argv[i + 1])
+            elif arg.startswith('--hour='):
+                hour = int(arg.split('=', 1)[1])
+            elif arg == '--auto-close':
+                auto_close = True
+
+        # daemon心跳协调(仅真实auto-close路径, 测试模式/手工check不受影响):
+        # 守护进程存活→cron跳过防双写; 交易时段心跳超时→告警+cron接管兜底
+        if auto_close and not test_date:
+            # 盘后日报(Task#123): 必须置于daemon心跳跳过之前——15:01班次
+            # daemon刚在15:00自然退出, 心跳可能仍新鲜(<60s)导致早退吞掉日报
+            send_daily_report_if_due(datetime.now().strftime('%Y-%m-%d'))
+            age = daemon_heartbeat_age()
+            if age is not None and age < DAEMON_STALE_SEC:
+                print(f"[{datetime.now().strftime('%F %T')}] [cron跳过] "
+                      f"盘中守护进程存活(心跳{age:.0f}s前), "
+                      f"卖出检查由intraday_monitor负责")
+                return 0
+            now = datetime.now()
+            in_session = (now.weekday() < 5 and
+                          '09:28' <= now.strftime('%H:%M') < '15:00')
+            cand_file = os.path.join(
+                OUTPUT_DIR, f"candidates_{now.strftime('%Y%m%d')}.json")
+            # 交易日proxy: 当日candidates文件存在(与daemon自判交易日同口径),
+            # 避免节假日误报daemon死亡
+            if in_session and os.path.exists(cand_file):
+                alert_daemon_down(age)
+        check_positions(test_date, hour, auto_close)
+
+    elif cmd == 'daily-report':
+        # 手工触发盘后日报: --force跳过幂等重发, --note 标题后缀(如"修正版")
+        force = '--force' in sys.argv
+        note = ''
+        for i, arg in enumerate(sys.argv[2:], 2):
+            if arg == '--note' and i < len(sys.argv) - 1:
+                note = sys.argv[i + 1]
+            elif arg.startswith('--note='):
+                note = arg.split('=', 1)[1]
+        send_daily_report_if_due(datetime.now().strftime('%Y-%m-%d'),
+                                 force=force, note=note)
+
+    elif cmd == 'confirm-buy':
+        confirm_buy()
+
+    elif cmd == 'confirm-sell':
+        if len(sys.argv) < 4:
+            print("用法: python realtime/position_tracker.py confirm-sell CODE PRICE")
+            return 1
+        code = sys.argv[2]
+        price = float(sys.argv[3])
+        confirm_sell(code, price)
+
+    elif cmd == 'add':
+        if len(sys.argv) < 10:
+            print("用法: python realtime/position_tracker.py add "
+                  "CODE NAME STRATEGY SLOT_ID BUY_PRICE TP SL EXPIRE_DATE")
+            return 1
+        add_position(
+            code=sys.argv[2],
+            name=sys.argv[3],
+            strategy=sys.argv[4],
+            slot_id=sys.argv[5],
+            buy_price=float(sys.argv[6]),
+            tp_price=float(sys.argv[7]),
+            sl_price=float(sys.argv[8]),
+            expire_date=sys.argv[9],
+        )
+
+    elif cmd == 'list':
+        list_positions()
+
+    else:
+        print(f"未知命令: {cmd}")
+        print("可用命令: check, confirm-buy, confirm-sell, add, list")
+        return 1
+
+    return 0
+
+
+if __name__ == '__main__':
+    sys.exit(main())

@@ -1,0 +1,483 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""
+[Task#256] 全链心跳监控——"监控的监控"(t255风险审计Top运维防线)
+====================================================================
+每交易日17:00由cron触发(0 17 * * 1-5), 逐项判定当日全链任务执行状态,
+输出一条企微汇总通知(正常也发——"✅全链绿"让静默失败无处藏身)。
+
+设计要点:
+- 只读判定: 从各任务日志/产物文件判定, 不改任何cron条目、不碰交易决策逻辑
+- 状态四档: ✅正常 / ⚠️异常(有错误行或覆盖不完整) / ❌未跑(无当日日志) / ⏸跳过
+- G5存活事后检查: nohup常驻任务(探测器/追踪器/采集器)按日志覆盖时段完整性判定
+- G1通知链自检: 心跳自身发送失败→写heartbeat_failed.flag, 次日心跳自查补报
+  (send_qywx层的重试+NOTIFY_FAIL落档由realtime/notify.py Task#256 G1承担)
+- 兜底极限约定: 每交易日17:05未收到心跳=系统异常(人肉最后防线, 见t255 §5)
+
+铁证背景: 2026-08-08 P0级日K完整性门告警只落scheduler_alerts.log文件无人知。
+"""
+import json
+import os
+import re
+import subprocess
+import sys
+import urllib.request
+from datetime import datetime, timedelta
+
+sys.path.insert(0, '/home/AIWealth')
+
+# ========== 配置区 ==========
+ROOT = '/home/AIWealth'
+LOG_DIR = os.path.join(ROOT, 'logs')
+RT_LOG = os.path.join(LOG_DIR, 'realtime')
+DATA_RT = os.path.join(ROOT, 'data', 'realtime')
+FLAG_FILE = os.path.join(DATA_RT, 'heartbeat_failed.flag')   # G1自检flag
+ALERT_LOG = os.path.join(RT_LOG, 'scheduler_alerts.log')
+
+# 盘中常驻任务日志覆盖完整性阈值(G5): 应存活至15:00附近, mtime>=该时刻为完整
+INTRADAY_COVER_HM = '14:50'
+# 冲板探测器实跑窗口9:30-9:50, 日志mtime>=该时刻视为完整收尾
+DETECTOR_COVER_HM = '09:45'
+# 板块涨停采样最后一轮15:00, 最新快照>=该时刻为完整
+SECTOR_COVER_HM = '14:30'
+# ============================
+
+
+def now_str():
+    return datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+
+
+def prev_weekday(d):
+    """前一个工作日(周一→上周五); 法定节假日无法识别, 相关项文案已含说明。"""
+    p = d - timedelta(days=1)
+    while p.weekday() >= 5:
+        p -= timedelta(days=1)
+    return p
+
+
+def is_trading_day(today_str):
+    """交易日判定: 腾讯行情sh000001最新数据日期==今天 → 交易日。
+    接口失败时降级: 当日决策/盘中产物存在→交易日; 再降级→工作日即视为交易日。
+    返回 (bool, 判定依据str)。"""
+    try:
+        req = urllib.request.Request('http://qt.gtimg.cn/q=sh000001')
+        req.add_header('User-Agent', 'Mozilla/5.0')
+        body = urllib.request.urlopen(req, timeout=10).read().decode('gbk')
+        m = re.search(r'v_sh000001="([^"]*)"', body)
+        parts = m.group(1).split('~') if m else []
+        if len(parts) > 30 and len(parts[30]) >= 8:
+            quote_day = parts[30][:8]                     # YYYYMMDDHHMMSS
+            return (quote_day == today_str.replace('-', ''),
+                    f'腾讯行情最新日={quote_day}')
+    except Exception as e:
+        print(f'[heartbeat] 行情源交易日判定失败(降级本地): {e}')
+    ymd = today_str.replace('-', '')
+    if (os.path.exists(os.path.join(DATA_RT, f'decision_{ymd}.json'))
+            or _mtime_is_today(os.path.join(RT_LOG, 'intraday_monitor.log'),
+                               today_str)):
+        return True, '本地产物降级判定'
+    return datetime.now().weekday() < 5, '工作日兜底判定'
+
+
+def _mtime_dt(path):
+    try:
+        return datetime.fromtimestamp(os.path.getmtime(path))
+    except OSError:
+        return None
+
+
+def _mtime_is_today(path, today_str):
+    dt = _mtime_dt(path)
+    return bool(dt) and dt.strftime('%Y-%m-%d') == today_str
+
+
+def _tail(path, nbytes=16384):
+    try:
+        with open(path, 'rb') as f:
+            f.seek(0, os.SEEK_END)
+            f.seek(max(0, f.tell() - nbytes))
+            return f.read().decode('utf-8', errors='replace')
+    except OSError:
+        return ''
+
+
+def item(name, status, detail=''):
+    """status: ok/warn/fail/skip/info"""
+    return {'name': name, 'status': status, 'detail': detail}
+
+
+# =============================================================================
+# 各任务检查(从日志/产物判定, 全部只读)
+# =============================================================================
+
+def check_daily_kline(today):
+    """日K更新(前一工作日18:30, 自检门退出态)。
+    库态优先: 当晚门告警但事后回补链已补齐的, 如实标注不误报。节假日误报已在文案说明。"""
+    p = prev_weekday(datetime.strptime(today, '%Y-%m-%d'))
+    p_str, p_ymd = p.strftime('%Y-%m-%d'), p.strftime('%Y%m%d')
+    log = os.path.join(LOG_DIR, f'daily_update_{p_ymd}.log')
+    label = f'日K更新({p.month}/{p.day} 18:30)'
+    if not os.path.exists(log):
+        return item(label, 'fail', '无当日日志(cron未跑?)')
+    try:
+        content = open(log, encoding='utf-8', errors='replace').read()
+    except OSError as e:
+        return item(label, 'warn', f'日志读取失败: {e}')
+    if '今天是周末' in content:
+        return item(label, 'skip', '周末跳过')
+    bad = [ln.strip() for ln in content.splitlines()
+           if ('数据完整性告警' in ln or '[ERROR]' in ln or 'K线抓取异常' in ln)]
+    # 库侧真值(事后回补链可能已补齐当晚缺口)
+    db_n = None
+    try:
+        import sqlite3
+        conn = sqlite3.connect(f'file:{ROOT}/data/stocks.db?mode=ro', uri=True,
+                               timeout=5)
+        db_n = conn.execute('SELECT COUNT(*) FROM stock_kline WHERE date=?',
+                            (p_str,)).fetchone()[0]
+        conn.close()
+    except Exception:
+        pass
+    if db_n is not None and db_n >= 4500:
+        note = f'库态{db_n}行完整'
+        if bad:
+            note += f'(当晚自检门曾告警, 已回补)'
+        return item(label, 'ok', note)
+    if bad:
+        return item(label, 'warn',
+                    f'自检门/抓取异常且库态{db_n}行未补齐: '
+                    f'{bad[-1][:70]}(节假日0行可忽略)')
+    if '=== 每日数据更新结束 ===' not in content:
+        return item(label, 'warn', '日志未收尾(疑中途中断)')
+    return item(label, 'warn' if db_n is not None else 'ok',
+                f'日志收尾正常但库态仅{db_n}行' if db_n is not None
+                else '日志收尾正常(库态未能验证)')
+
+
+def check_candidates(today):
+    """候选生成(昨晚23:30→今日候选文件)。"""
+    ymd = today.replace('-', '')
+    fp = os.path.join(DATA_RT, f'candidates_{ymd}.json')
+    if not os.path.exists(fp):
+        return item('候选生成(昨晚23:30)', 'fail', f'candidates_{ymd}.json缺失')
+    n = ''
+    try:
+        data = json.load(open(fp, encoding='utf-8'))
+        # 结构: 顶层={元信息键..., 策略名: [候选list]}; strategies为名单键需排除
+        cnt = sum(len(v) for k, v in data.items()
+                  if isinstance(v, list) and k != 'strategies')
+        n = f'候选{cnt}只 '
+    except Exception:
+        n = '(计数解析失败) '
+    dt = _mtime_dt(fp)
+    return item('候选生成(昨晚23:30)', 'ok',
+                f"{n}生成于{dt.strftime('%m/%d %H:%M') if dt else '?'}")
+
+
+def check_morning_decision(today):
+    """晨间决策9:25(决策产物+熔断检查)。"""
+    ymd = today.replace('-', '')
+    fp = os.path.join(DATA_RT, f'decision_{ymd}.json')
+    if not os.path.exists(fp):
+        return item('晨间决策(9:25)', 'fail', f'decision_{ymd}.json缺失')
+    tail = _tail(os.path.join(RT_LOG, 'morning_decision.log'))
+    if '熔断' in tail and _mtime_is_today(
+            os.path.join(RT_LOG, 'morning_decision.log'), today):
+        return item('晨间决策(9:25)', 'warn', '决策产物存在但日志尾部含熔断字样, 需人工复核')
+    return item('晨间决策(9:25)', 'ok', '决策产物落盘')
+
+
+def check_intraday_monitor(today):
+    """盘中监控daemon(10秒轮询, 15:00自然退出)——G5覆盖完整性。
+    注意: daemon正常退出时会删除心跳文件(remove_heartbeat), 盘后事后检查
+    以intraday_monitor.log的'自然退出'收尾标记为准, 心跳文件仅作补充。"""
+    log = os.path.join(RT_LOG, 'intraday_monitor.log')
+    hb = os.path.join(RT_LOG, 'intraday_monitor_heartbeat')
+    if _mtime_is_today(log, today):
+        tail = _tail(log, 4096)
+        m = re.search(r'自然退出\(共(\d+)轮\)', tail)
+        if m:
+            return item('盘中监控心跳', 'ok', f'15:00自然退出(共{m.group(1)}轮)')
+        hb_dt = _mtime_dt(hb)
+        if hb_dt and hb_dt.strftime('%Y-%m-%d') == today:
+            hm = hb_dt.strftime('%H:%M')
+            if hm >= INTRADAY_COVER_HM:
+                return item('盘中监控心跳', 'ok', f'心跳覆盖至{hm}(未见收尾标记)')
+            return item('盘中监控心跳', 'warn', f'心跳止于{hm}(疑提前死亡)')
+        return item('盘中监控心跳', 'warn', '当日有日志但无自然退出标记且心跳已清除')
+    hb_dt = _mtime_dt(hb)
+    if hb_dt and hb_dt.strftime('%Y-%m-%d') == today:
+        return item('盘中监控心跳', 'warn',
+                    f"心跳存在({hb_dt.strftime('%H:%M')})但主日志无当日更新")
+    return item('盘中监控心跳', 'fail', '当日无日志无心跳(daemon未拉起?)')
+
+
+def check_shadow_detector(today):
+    """冲板探测器9:25(nohup, 实跑9:30-9:50)——G5。"""
+    ymd = today.replace('-', '')
+    log = os.path.join(ROOT, 'research', 'results', 'shadow_surge',
+                       f'detector_{ymd}.log')
+    if not os.path.exists(log):
+        return item('冲板探测器(9:25)', 'fail', '当日detector日志缺失')
+    dt = _mtime_dt(log)
+    hm = dt.strftime('%H:%M') if dt else '?'
+    sig = os.path.join(ROOT, 'research', 'results', 'shadow_surge',
+                       f'shadow_signals_{ymd}.json')
+    if hm < DETECTOR_COVER_HM:
+        return item('冲板探测器(9:25)', 'warn', f'日志止于{hm}(疑窗口内死亡)')
+    return item('冲板探测器(9:25)', 'ok',
+                f"收尾{hm}{' 信号已落盘' if os.path.exists(sig) else ''}")
+
+
+def check_shadow_tracker(today):
+    """影子追踪器9:28(5分钟轮询至15:00)——G5覆盖完整性。"""
+    log = os.path.join(LOG_DIR, 'shadow_tracker.log')
+    if not _mtime_is_today(log, today):
+        return item('影子追踪器(9:28)', 'fail', '当日无日志更新')
+    dt = _mtime_dt(log)
+    hm = dt.strftime('%H:%M')
+    if hm < INTRADAY_COVER_HM:
+        return item('影子追踪器(9:28)', 'warn', f'日志止于{hm}(疑提前死亡)')
+    m = re.findall(r'\[round (\d+)\]', _tail(log))
+    rounds = f' 轮次{m[-1]}' if m else ''
+    return item('影子追踪器(9:28)', 'ok', f'覆盖至{hm}{rounds}')
+
+
+def check_board_collector(today):
+    """打板实验室采集器9:28(nohup至15:00)——G5 + 产物检查(t219事故防复发)。"""
+    log = os.path.join(LOG_DIR, 'board_lab_collector.log')
+    ymd = today.replace('-', '')
+    ev = os.path.join(ROOT, 'data', 'board_process', f'events_{ymd}.jsonl')
+    if not _mtime_is_today(log, today):
+        return item('板块采集器(9:28)', 'fail', '当日无日志更新')
+    dt = _mtime_dt(log)
+    hm = dt.strftime('%H:%M')
+    if hm < INTRADAY_COVER_HM:
+        return item('板块采集器(9:28)', 'warn', f'日志止于{hm}(疑提前死亡)')
+    if not os.path.exists(ev):
+        return item('板块采集器(9:28)', 'warn', f'覆盖至{hm}但events_{ymd}缺失')
+    return item('板块采集器(9:28)', 'ok', f'覆盖至{hm} events已落盘')
+
+
+def check_sector_limitup(today):
+    """板块涨停采样(盘中每30分钟)。"""
+    ymd = today.replace('-', '')
+    d = os.path.join(ROOT, 'data', 'sector_limitup')
+    try:
+        snaps = sorted(f for f in os.listdir(d)
+                       if f.startswith(f'sector_{ymd}_'))
+    except OSError:
+        snaps = []
+    if not snaps:
+        return item('板块涨停采样', 'fail', '当日零快照')
+    last_hm = snaps[-1][-9:-5]                    # sector_YYYYMMDD_HHMM.json
+    last_fmt = f'{last_hm[:2]}:{last_hm[2:]}'
+    if last_fmt < SECTOR_COVER_HM:
+        return item('板块涨停采样', 'warn',
+                    f'{len(snaps)}份快照, 最后{last_fmt}(<{SECTOR_COVER_HM})')
+    return item('板块涨停采样', 'ok', f'{len(snaps)}份快照, 最后{last_fmt}')
+
+
+def check_seal_reseal(today):
+    """回封筛选15:10(测试信号)。"""
+    ymd = today.replace('-', '')
+    fp = os.path.join(ROOT, 'research', 'results', 'shadow_surge',
+                      f'reseal_signals_{ymd}.json')
+    if not os.path.exists(fp):
+        return item('回封筛选(15:10)', 'fail', '当日信号产物缺失')
+    tail = _tail(os.path.join(RT_LOG, 'seal_reseal.log'))
+    m = re.findall(r'\[汇总\] status=(\S+) 信号(\d+)只', tail)
+    st = f' {m[-1][0]} 信号{m[-1][1]}只' if m else ''
+    if m and m[-1][0] not in ('ok', 'success') and 'missing' in m[-1][0]:
+        return item('回封筛选(15:10)', 'warn', f'产物存在但{st}(上游events缺失)')
+    return item('回封筛选(15:10)', 'ok', f'产物落盘{st}')
+
+
+def check_shadow_ledger(today):
+    """影子台账15:20。"""
+    log = os.path.join(RT_LOG, 'shadow_ledger.log')
+    if not _mtime_is_today(log, today):
+        return item('影子台账(15:20)', 'fail', '当日无日志更新')
+    if '台账已更新' not in _tail(log, 4096):
+        return item('影子台账(15:20)', 'warn', '日志有更新但尾部无完成标记')
+    return item('影子台账(15:20)', 'ok', '台账已更新')
+
+
+def check_backfill_chain(today):
+    """回补链进度(t233触板宇宙5min + BaoStock恢复续跑), 信息型。"""
+    detail = []
+    txt = _tail(ALERT_LOG, 32768)
+    m = re.findall(r'\[T233_BACKFILL\].*?总进度(\d+)/(\d+)\((\d+\.?\d*)%\)', txt)
+    if m:
+        done, total, pct = m[-1]
+        detail.append(f't233触板回补{pct}%({done}/{total})')
+    rec = os.path.join(RT_LOG, 'baostock_recovery.log')
+    dt = _mtime_dt(rec)
+    if dt and dt.strftime('%Y-%m-%d') == today:
+        detail.append(f"恢复续跑活跃({dt.strftime('%H:%M')})")
+    try:
+        ban = json.load(open(os.path.join(ROOT, 'data',
+                                          'baostock_ban_status.json')))
+        detail.append('BaoStock已恢复' if ban.get('recovered', True)
+                      else 'BaoStock封禁中(腾讯降级源)')
+    except Exception:
+        pass
+    return item('回补链', 'info', ' | '.join(detail) or '无进度记录')
+
+
+def check_baostock_budget(today):
+    """[Task#259] BaoStock当日API用量(统一日预算账本, 4万/日用户红线), 信息型。"""
+    fp = os.path.join(ROOT, 'data', 'baostock_daily_budget.json')
+    try:
+        d = json.load(open(fp, encoding='utf-8'))
+    except Exception:
+        return item('BaoStock当日API用量', 'info', '账本未生成(今日无请求)')
+    if d.get('date') != today:
+        return item('BaoStock当日API用量', 'info',
+                    f"账本日期{d.get('date')}非今日(今日尚无请求)")
+    used_n = d.get('used', 0)
+    hard = d.get('hard_limit', 40000)
+    pct = used_n / hard * 100 if hard else 0
+    status = 'info' if pct < 90 else 'warn'
+    return item('BaoStock当日API用量', status,
+                f"{used_n}/{hard} ({pct:.1f}%) | 软停{d.get('soft_limit', 39000)}")
+
+
+def check_nav_snapshot(today):
+    """nav快照19:00(前一工作日, strategy_health→drawdown_guard链)。"""
+    p = prev_weekday(datetime.strptime(today, '%Y-%m-%d'))
+    p_str = p.strftime('%Y-%m-%d')
+    label = f'nav快照({p.month}/{p.day} 19:00)'
+    txt = _tail(os.path.join(RT_LOG, 'strategy_health.log'), 8192)
+    m = re.search(rf'\[strategy_health\] {p_str} 19:\S+ .*?告警(\d+)条', txt)
+    if not m:
+        return item(label, 'fail', f'{p_str}无19:00运行记录(节假日可忽略)')
+    n_alert = int(m.group(1))
+    if n_alert > 0:
+        return item(label, 'warn', f'已运行但策略健康告警{n_alert}条')
+    return item(label, 'ok', '健康度+nav快照完成, 告警0条')
+
+
+def check_announcement_monitor(today):
+    """公告监控7:30(t253, 部署后自动纳入监控)。"""
+    try:
+        cron = subprocess.run(['crontab', '-l'], capture_output=True,
+                              text=True, timeout=10).stdout
+    except Exception:
+        cron = ''
+    if 'announcement_monitor' not in cron:
+        return item('公告监控(7:30)', 'skip', 't253未部署, 部署后自动纳入')
+    log = os.path.join(RT_LOG, 'announcement_monitor.log')
+    if not os.path.exists(log):
+        return item('公告监控(7:30)', 'skip', '已部署待首跑')
+    if not _mtime_is_today(log, today):
+        return item('公告监控(7:30)', 'fail', '已部署但当日无运行日志')
+    tail = _tail(log, 4096)
+    if 'Traceback' in tail:
+        return item('公告监控(7:30)', 'warn', '当日日志含Traceback')
+    return item('公告监控(7:30)', 'ok', '当日已运行')
+
+
+# =============================================================================
+# 通知组装与G1自检
+# =============================================================================
+
+STATUS_ICON = {'ok': '✅', 'warn': '⚠️', 'fail': '❌', 'skip': '⏸', 'info': 'ℹ️'}
+
+
+def read_failed_flag():
+    """读取前次心跳发送失败flag(G1补报)。"""
+    try:
+        return json.load(open(FLAG_FILE, encoding='utf-8'))
+    except Exception:
+        return None
+
+
+def build_message(today, items, trade_day, basis, flag_info):
+    abnormal = [it for it in items if it['status'] in ('fail', 'warn')]
+    normal = [it for it in items if it['status'] == 'ok']
+    skipped = [it for it in items if it['status'] == 'skip']
+    infos = [it for it in items if it['status'] == 'info']
+
+    if abnormal:
+        head = f'🫀 全链心跳 {today}｜❌{sum(1 for i in abnormal if i["status"]=="fail")} ⚠️{sum(1 for i in abnormal if i["status"]=="warn")}'
+    else:
+        head = f'🫀 全链心跳 {today}｜✅全链绿'
+    lines = [f'**{head}**']
+    if flag_info:
+        lines.append(f"<font color=\"#FF0000\">⚠️ 补报: {flag_info.get('date', '?')}"
+                     f"心跳发送失败(当日通知可能未送达, 详见scheduler_alerts)</font>")
+    if not trade_day:
+        lines.append(f'⏸ 今日非交易日({basis}), 交易链任务按设计跳过')
+    if abnormal:
+        lines.append('—— 异常项 ——')
+        for it in abnormal:
+            lines.append(f"<font color=\"#FF0000\">{STATUS_ICON[it['status']]} "
+                         f"{it['name']}: {it['detail']}</font>")
+    if normal:
+        lines.append('—— 正常项 ——')
+        for it in normal:
+            lines.append(f"{STATUS_ICON['ok']} {it['name']}: {it['detail']}")
+    for it in skipped:
+        lines.append(f"⏸ {it['name']}: {it['detail']}")
+    for it in infos:
+        lines.append(f"ℹ️ {it['name']}: {it['detail']}")
+    lines.append(f'检查时间 {now_str()}｜17:05未收到本心跳=系统异常')
+    return '\n'.join(lines)
+
+
+def main():
+    dry_run = '--dry-run' in sys.argv
+    today = datetime.now().strftime('%Y-%m-%d')
+    trade_day, basis = is_trading_day(today)
+    flag_info = read_failed_flag()
+
+    items = []
+    if trade_day:
+        checks = [check_daily_kline, check_candidates, check_morning_decision,
+                  check_intraday_monitor, check_shadow_detector,
+                  check_shadow_tracker, check_board_collector,
+                  check_sector_limitup, check_seal_reseal,
+                  check_shadow_ledger, check_nav_snapshot,
+                  check_announcement_monitor, check_backfill_chain,
+                  check_baostock_budget]
+    else:
+        checks = [check_daily_kline, check_backfill_chain,
+                  check_baostock_budget]
+    for fn in checks:
+        try:
+            items.append(fn(today))
+        except Exception as e:           # 单项检查崩溃不拖垮整条心跳
+            items.append(item(fn.__name__, 'warn', f'检查自身异常: {e}'))
+
+    msg = build_message(today, items, trade_day, basis, flag_info)
+    print('=' * 60)
+    print(msg)
+    print('=' * 60)
+
+    if dry_run:
+        print('[heartbeat] dry-run: 不发送、不动flag')
+        return 0
+
+    from realtime.notify import send_qywx
+    ok = send_qywx(msg, msgtype='markdown')
+    if ok:
+        print(f'[heartbeat] {now_str()} 心跳发送成功')
+        if os.path.exists(FLAG_FILE):
+            os.remove(FLAG_FILE)         # 补报已随本条送达, 清flag
+            print('[heartbeat] 昨日失败flag已补报并清除')
+    else:
+        # G1: 自身失败→落flag, 次日心跳补报(send_qywx已重试1次+NOTIFY_FAIL落档)
+        try:
+            with open(FLAG_FILE, 'w', encoding='utf-8') as f:
+                json.dump({'date': today, 'ts': now_str(),
+                           'reason': 'heartbeat send_qywx失败(已重试)'},
+                          f, ensure_ascii=False, indent=1)
+            print(f'[heartbeat] 发送失败, 已写{FLAG_FILE}待次日补报')
+        except OSError as e:
+            print(f'[heartbeat] flag写入也失败(极端): {e}')
+    return 0
+
+
+if __name__ == '__main__':
+    sys.exit(main())

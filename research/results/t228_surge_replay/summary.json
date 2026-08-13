@@ -1,0 +1,64 @@
+{
+  "task": "Task#228 冲板策略31日分钟回放验证",
+  "strategy": "早盘冲板追击 early_surge_chase_0940 (G5)",
+  "date": "2026-08-08",
+  "window": {"start": "2026-06-26", "end": "2026-08-07", "trading_days": 31,
+             "cold": "2026-06-26~2026-07-31 (26天)", "hot": "2026-08-03~2026-08-07 (5天)"},
+  "method": "直接import生产影子探测器(research/shadow_surge_detector.py)的build_universe/ShadowSurgeSM/replay做dry-run回放(零信号逻辑重实现), 交易按G5终审口径(确认bar次bar开盘买/D+1 0940bar开定时卖/跌停一字顺延hour2-4/火箭拒单/0.1%双边费)",
+  "g5_baseline": {"period": "2024-01-01~2026-07-31", "n_trades": 530, "win_rate_pct": 53.02,
+                  "avg_profit_pct": 0.83, "cagr_pct": 275.75, "monthly_equiv_pct": 11.66},
+  "replay_engine_slot1": {
+    "note": "引擎slot=1语义: 每日最早确认bar的winner(非火箭)1笔, 与G5基线530笔口径对齐",
+    "signals": 31, "closed": 30, "open": 1,
+    "win_rate_pct": 50.0, "avg_profit_pct": 0.8297, "profit_sum_pct": 24.89,
+    "compound_pct": 21.90, "mdd_pct": 27.37, "monthly_equiv_pct": 14.36,
+    "avg_se_pct": 1.08,
+    "cold": {"closed": 26, "win_rate_pct": 42.31, "avg_profit_pct": 0.2341,
+             "compound_pct": 1.51, "monthly_equiv_pct": 1.22},
+    "hot": {"closed": 4, "open": 1, "win_rate_pct": 100.0, "avg_profit_pct": 4.7013,
+            "compound_pct": 20.08}
+  },
+  "replay_ledger_perbar": {
+    "note": "影子台账口径: 每确认bar winner(非火箭), SHADOW_LEDGER'引擎语义笔'同口径——高估引擎笔数",
+    "closed": 87, "win_rate_pct": 43.68, "avg_profit_pct": -0.1861,
+    "cold": {"closed": 75, "win_rate_pct": 37.33, "avg_profit_pct": -0.8206},
+    "hot": {"closed": 12, "win_rate_pct": 83.33, "avg_profit_pct": 3.7793}
+  },
+  "verdict_criteria": {
+    "win_rate_within_5pp": {"value": -3.02, "pass": true},
+    "cold_avg_positive_or_wr_gt_48": {"cold_avg": 0.2341, "cold_wr": 42.31, "pass": true,
+                                       "note": "以'冷段笔均>0'过线; 胜率42.31%未过48%线, 如实标注"},
+    "verdict": "a) 31日与G5基线一致且冷段不崩 → 出实盘化裁决包(建议独立小仓位试点, 非第6槽)"
+  },
+  "golden_anchor": {
+    "note": "G5基线引擎跑与回放窗重叠26天含20笔真实引擎成交, 1:1对账",
+    "overlap_trades": 20, "identical_days": 8, "identical_price_exact": true,
+    "diff_days": 12,
+    "diff_root_cause": "基线引擎2026-08-04跑在34.4%覆盖率的有偏minute.db上信号集更小; 12个不同码日中引擎所选码在回放信号集内买入价全部分毫不差; 2笔pnl差异=引擎当年minute断供走hour1_open兜底 vs 回放真实0940bar开",
+    "cold_window_consistency": "基线引擎同段20笔 avg+0.145%/wr45.0% vs 回放冷段26笔 avg+0.234%/wr42.3% — 同分布, 冷段弱=市场regime非口径漂移"
+  },
+  "shadow_cross_validation": {
+    "2026-08-07": {"live_signals": 9, "replay_signals": 13, "overlap": 9, "overlap_rate_of_live": 1.0,
+                   "buy_px_max_diff": 0.03, "note": "live 9笔100%被回放捕获; replay-only 4笔=qt轮询露出/时序限制; winner集2/3重合(sh.600183 bar归属live=0940/回放=0935, live quote时序限制)"},
+    "2026-08-06": {"live_signals": 26, "replay_signals": 28, "overlap": 21,
+                   "live_only_5_all_strict_intercepted": {"sz.001282": 9.795, "sz.002355": 9.821, "sh.600262": 17.916, "sh.603602": 12.793, "sz.003040": 9.709},
+                   "note": "8/6 live为降级缺陷口径(无基线放行); live-only 5笔在STRICT回放下全部vr>=9拦截——STRICT语义自洽铁证"}
+  },
+  "supply_structure": {"avg_raw_signals_per_day": 30.3, "zero_signal_days": 0,
+                       "avg_engine_trades_per_day": 1.0, "avg_perbar_trades_per_day": 2.87,
+                       "day_2026_07_31_spike": 102},
+  "execution_semantics": {"t1_compliant": true, "limitdown_defer_trades": 1,
+                          "defer_case": "sh.603256 6/26买 6/29 0940一字跌停→hour2_open顺延卖 -9.25%",
+                          "hour1_fallback_trades": 0, "future_data": "探测器状态机原生防未来(触发仅用时刻内quote+昨日基线)"},
+  "qa": {"sampled": 2, "cases": ["sh.605028 2026-07-22 +12.09%(盈)", "sz.002289 2026-07-20 -8.92%(亏)"],
+         "checks": "白名单/exdiv守卫/首穿bar/量能基线/次bar买/winner最低vr/D+1 0940卖/跌停判定/费率pnl/T+1/防未来 全PASS",
+         "evidence": "qa.out"},
+  "risks_honest": [
+    "冷段以'笔均>0'过线但胜率42.31%<48%, 月化仅+1.22%(量级与G5基线自身最弱年2024一致, 非Abel式崩塌但确是薄利)",
+    "30笔笔均+0.83%±1.08(se), 与基线一致的证据强, 独立显著alpha的证据弱",
+    "alpha热段集中: 全窗+21.9%复利中热段5天贡献+20.1pp",
+    "影子台账per-bar口径(B)冷段-0.82%会污染裁决样本, 建议台账改为每日最早bar winner(slot=1)口径"
+  ],
+  "artifacts": ["REPLAY_REPORT.md", "summary.json", "STATUS.md", "trades_engine_slot1.json", "trades_ledger_perbar.json", "qa.out", "xval.out"],
+  "registry": "research/ideas/README.md 登记#83"
+}

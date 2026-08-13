@@ -1,0 +1,32 @@
+{
+ "meta": {
+  "strategy": "早盘冲板追击(early_surge_chase_0940) 影子探测",
+  "date": "2026-08-05",
+  "prev_date": "2026-08-04",
+  "mode": "live",
+  "started_at": "2026-08-05 09:28:52",
+  "finished_at": "2026-08-05 09:50:00",
+  "whitelist": 2305,
+  "watched": 83,
+  "rounds_or_replay_codes": 120,
+  "rate_limit": {
+   "poll_interval_s": 10.0,
+   "min_req_gap_s": 1.0,
+   "max_req_per_round": 4
+  },
+  "skip_counts": {
+   "yizi": 4,
+   "no_vol_baseline": 18,
+   "chain_missing": 1,
+   "window_out": 6,
+   "unconfirmed_session_end": 4
+  },
+  "reconstructed": "2026-08-06 Task#199回放误覆盖事故后, 从detector_20260805.log如实重建(原信号0)"
+ },
+ "signals": [],
+ "skips": [
+  {
+   "note": "skips明细在事故中丢失, 计数见meta.skip_counts(日志重建)"
+  }
+ ]
+}

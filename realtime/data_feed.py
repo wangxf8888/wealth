@@ -20,6 +20,49 @@ import pandas as pd
 import numpy as np
 from datetime import datetime, timedelta
 
+import trading_rules
+from realtime.config import PERMISSIVE_OPEN_RATIO
+
+
+# ==============================================================================
+# [Task#218 2026-08-07] 行情源主备切换骨架 —— 腾讯qt主源 + 东财push2热备
+# ==============================================================================
+# 现状: 腾讯qt是实盘唯一实时主源(morning_decision/_fetch_from_tencent等5处),
+#       单点故障无热备。备源能力已封装在 tools/em_snapshot.py(与腾讯解析
+#       同构的统一字段输出, 双源对拍单测见 research/results/t218_api_onboard/)。
+# 本次只交付能力, 不激活生产切换: DUAL_SOURCE_ENABLED默认False,
+# 下面骨架函数生产链零调用, 激活需leader审批后在调用点接线。
+#
+# 激活时的接线点位(均为各自文件内 _fetch_from_tencent 失败分支):
+#   1. realtime/morning_decision.py::_fetch_from_tencent — 9:25开盘价(现fallback新浪)
+#   2. realtime/position_tracker.py::_fetch_from_tencent — 持仓监控
+#   3. realtime/notify.py::_fetch_from_tencent — 通知行情
+#   接线模式(调用示例):
+#     from realtime import data_feed as df_mod
+#     quotes = _fetch_from_tencent(codes)
+#     if not quotes and df_mod.record_tencent_failure():   # 连续N次失败触发
+#         from tools.em_snapshot import fetch_eastmoney_snapshot
+#         em = fetch_eastmoney_snapshot(codes, req_gap=1.0)  # 生产限速≥腾讯同级
+#         quotes = {c: {'open': v['open'], 'preclose': v['preclose']}
+#                   for c, v in em.items() if v['open'] > 0}
+#     else:
+#         df_mod.record_tencent_success()
+DUAL_SOURCE_ENABLED = False   # 热备总开关(未经leader审批不得置True)
+TENCENT_FAIL_THRESHOLD = 3    # 腾讯连续失败N次后切备源
+_tencent_fail_count = [0]     # 进程内连续失败计数(成功即清零)
+
+
+def record_tencent_failure() -> bool:
+    """腾讯源失败一次; 返回是否应切换到东财备源(开关开且达阈值)。"""
+    _tencent_fail_count[0] += 1
+    return (DUAL_SOURCE_ENABLED
+            and _tencent_fail_count[0] >= TENCENT_FAIL_THRESHOLD)
+
+
+def record_tencent_success():
+    """腾讯源成功, 清零连续失败计数(回切主源)。"""
+    _tencent_fail_count[0] = 0
+
 
 # 与BacktestDataFeed一致的字段定义
 _DAY_FIELDS = ['open', 'open_rate', 'high', 'low', 'close', 'close_rate',
@@ -135,6 +178,25 @@ class RealtimeDataFeed:
         out.reverse()
         return out
 
+    def get_limit_prices(self, code: str, date: str) -> tuple:
+        """返回 (涨停价, 跌停价)。语义对齐 BacktestDataFeed.get_limit_prices:
+        当日preclose+isST → trading_rules.limit_prices; 无数据返回(0.0, 0.0)不拦截。
+
+        signal/live模式下 date==trade_date 时走 _synthetic_today_df,
+        其 preclose=前一交易日close(实盘口径), isST沿用前日标记。(Task#36 B2-A依赖)
+        """
+        today = self._load_day(date)
+        if today is None or today.empty or code not in today.index:
+            return 0.0, 0.0
+        row = today.loc[code]
+        try:
+            preclose = float(row.get('preclose') or 0)
+        except (TypeError, ValueError):
+            preclose = 0.0
+        st_val = row.get('isST', 0)
+        is_st = bool(int(st_val)) if st_val is not None and not pd.isna(st_val) else False
+        return trading_rules.limit_prices(code, preclose, is_st)
+
     def is_market_down(self, date: str, threshold: float = -1.0) -> bool:
         """前一交易日大盘是否大跌。"""
         prev_date = self._prev_trading_date(date)
@@ -205,8 +267,10 @@ class RealtimeDataFeed:
             preclose = row.get('close') or 0  # trade_date的preclose = signal_date的close
             if preclose <= 0:
                 continue
-            # 极低open_rate使所有"低开"条件通过
-            permissive_open = round(preclose * 0.80, 2)
+            # 价格/涨幅解耦(P0-2修复): open_rate固定-20喂低开类条件全部放行,
+            # open价格用PERMISSIVE_OPEN_RATIO(0.80时与旧行为逐位一致;
+            # 0.995时温和低开, 不再撞死S3非跌停开/S4 open>昨low下界过滤)
+            permissive_open = round(preclose * PERMISSIVE_OPEN_RATIO, 2)
             info = {
                 'code': code,
                 'code_name': row.get('code_name', '') or '',
@@ -274,9 +338,11 @@ class RealtimeDataFeed:
                 continue
             if self._mode == 'live':
                 open_p = self._injected_open.get(code, preclose)
+                open_rate = (open_p / preclose - 1) * 100 if preclose > 0 else 0
             else:
-                open_p = round(preclose * 0.80, 2)  # permissive
-            open_rate = (open_p / preclose - 1) * 100 if preclose > 0 else 0
+                # signal模式: 价格/涨幅解耦, 与_signal_snapshot同口径
+                open_p = round(preclose * PERMISSIVE_OPEN_RATIO, 2)  # permissive
+                open_rate = -20.0
 
             records.append({
                 'code': code,
@@ -303,7 +369,7 @@ class RealtimeDataFeed:
         if signal_df is None or signal_df.empty or code not in signal_df.index:
             return 0.0
         preclose = signal_df.loc[code].get('close') or 0
-        return round(preclose * 0.80, 2) if preclose > 0 else 0.0
+        return round(preclose * PERMISSIVE_OPEN_RATIO, 2) if preclose > 0 else 0.0
 
     def _db_snapshot(self, date: str, hour: int) -> dict:
         """正常DB模式(与BacktestDataFeed一致)。"""

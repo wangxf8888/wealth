@@ -1,0 +1,130 @@
+ M .gitignore
+ M .qoder/rules/rule3.md
+ M PROGRESS_LOG.md
+ M PROJECT_STATUS.md
+ M README.md
+ M backtest/data_feed.py
+ M backtest/engine.py
+ M backtest/portfolio.py
+ M backtest/run_all5.py
+ M backtest/run_unified.py
+ M backtest/txt_formatter.py
+ M docs/strategies/README.md
+ M docs/strategies/amplitude_reversal.md
+ M docs/strategies/big_yang_low_open_v2.md
+ M docs/strategies/gem_star_late_seal.md
+ M docs/strategies/gem_star_limitup_low_open.md
+ M docs/strategies/limitup_early_seal.md
+ M docs/trading_mechanism.md
+ M frontend/dashboard.html
+ M frontend/dashboard.js
+ M frontend/signal.html
+ M realtime/config.py
+ M realtime/data_feed.py
+ M realtime/generate_candidates.py
+ M realtime/morning_decision.py
+ M realtime/position_tracker.py
+ D scripts/export_kline_data.py
+ M server.py
+ M strategies/amplitude_reversal.py
+ M strategies/base.py
+ M strategies/big_yang_low_open_v2.py
+ M strategies/gem_star_late_seal.py
+ D strategies/gem_star_limitup_low_open.py
+ D strategies/limitup_early_seal.py
+ M tools/daily_update.sh
+ M tools/fetch_daily_kline.py
+?? .bashrc
+?? .sentinel/
+?? CLEANUP_DELETED_20260802.txt
+?? FINAL_STATE_20260802.md
+?? PHASE
+?? QUICK_REFERENCE.txt
+?? RESEARCH_SUMMARY_20260803.md
+?? backtest/minute_exit.py
+?? backtest/position_scale.py
+?? backtest/promo_gate.py
+?? backup/
+?? docs/HANDOVER.md
+?? docs/entry_engine_design.md
+?? docs/strategies/firstboard_low_open_dip_v2.md
+?? docs/strategies/ice_position_overlay.md
+?? docs/strategies/two_board_pullback_dip_h1c.md
+?? "docs/strategies/\345\233\236\345\260\201\351\246\226\346\235\277_\346\265\213\350\257\225\344\277\241\345\217\267\350\257\264\346\230\216.md"
+?? "docs/strategies/\346\227\251\347\233\230\345\206\262\346\235\277\350\277\275\345\207\273_\346\265\213\350\257\225\344\277\241\345\217\267\350\257\264\346\230\216.md"
+?? docs/trailing_stop_live_operation.md
+?? docs/unified_pipeline_walkthrough.md
+?? execution_core.py
+?? frontend/reports
+?? frontend/reports.html
+?? frontend/signal.html.bak_20260805_t84_vertical
+?? frontend/signal.html.bak_20260808_t232
+?? realtime/config.py.bak_20260812_t320
+?? realtime/data_feed.py.bak_20260807_t218
+?? realtime/earnings_calendar.py
+?? realtime/generate_candidates.py.bak_20260812_t320
+?? realtime/intraday_monitor.py
+?? realtime/morning_decision.py.bak_20260812_t320
+?? realtime/notify.py
+?? realtime/notify.py.bak_20260810_t259
+?? realtime/notify.py.bak_20260812_t320
+?? realtime/position_tracker.py.bak_20260812_t320
+?? realtime/promo_gate.py
+?? realtime/test_notify_format.py
+?? reports/
+?? research/
+?? scripts/shadow_compare.py
+?? strategies/firstboard_low_open_dip_v2.py
+?? strategies/two_board_pullback_dip_h1c.py
+?? tick_scheduler.py
+?? tools/announcement_monitor.py
+?? tools/backfill_hour_tencent.py
+?? tools/backfill_index_kline.py
+?? tools/backfill_index_kline_tencent.py
+?? tools/backtest_vs_live_compare.py
+?? tools/baostock_budget.py
+?? tools/baostock_recovery.py
+?? tools/baostock_recovery.py.bak_20260810_t259
+?? tools/baostock_recovery_probe.py
+?? tools/baostock_socket_guard.py
+?? tools/board_lab_backtest.py
+?? tools/board_lab_collector.py
+?? tools/board_lab_miner.py
+?? tools/build_commitment_calendar.py
+?? tools/crontab_backup_20260724.txt
+?? tools/crontab_backup_shadow_env_20260725.txt
+?? tools/crontab_backup_task20_20260724_1022.txt
+?? tools/crontab_backup_task22_20260724_1748.txt
+?? tools/crontab_backup_task31_20260724_2226.txt
+?? tools/crontab_backup_task73_20260729_2157.txt
+?? tools/crontab_backup_weekend_probe_20260725.txt
+?? tools/crontab_new.txt
+?? tools/daily_heartbeat.py
+?? tools/daily_heartbeat.py.bak_20260810_t259
+?? tools/daily_plan_report.py
+?? tools/daily_review_report.py
+?? tools/daily_rolling_backtest.py
+?? tools/daily_update.sh.bak_20260810_t259
+?? tools/drawdown_guard.py
+?? tools/em_snapshot.py
+?? tools/execution_quality.py
+?? tools/fetch_daily_kline.py.bak_20260810_t259
+?? tools/fetch_daily_kline_fallback.py
+?? tools/fetch_earnings_calendar.py
+?? tools/fetch_minute_kline.py
+?? tools/fetch_minute_kline.py.bak_20260810_t259
+?? tools/fetch_minute_sina.py
+?? tools/fetch_sector_limitup.py
+?? tools/lhb_backfill.py
+?? tools/nightly_rolling.sh
+?? tools/observe_firstrun.sh
+?? tools/progress_scheduler.py
+?? tools/registry_append.py
+?? tools/sector_emotion.py
+?? tools/shadow_ledger.py
+?? tools/shadow_ledger.py.bak_20260808_t232
+?? tools/strategy_health.py
+?? tools/update_red_ratio.py
+?? tools/verify_daily_kline.py
+?? tools/weekly_solo_refresh.sh
+?? trading_rules.py

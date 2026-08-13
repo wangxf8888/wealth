@@ -1,0 +1,15 @@
+30 18 * * 1-5 /bin/bash /home/AIWealth/tools/daily_update.sh
+# [已失效,2026-07-24注释] scripts/update_status.py 文件不存在,由 progress_scheduler.py 取代
+# */10 * * * * /usr/bin/python3 /home/AIWealth/scripts/update_status.py >> /home/AIWealth/logs/update_status.log 2>&1
+# AIWealth 实盘信号系统
+0 22 * * 1-5 cd /home/AIWealth && python3 realtime/generate_candidates.py >> logs/realtime/generate_candidates.log 2>&1
+25 9 * * 1-5 cd /home/AIWealth && python3 realtime/morning_decision.py >> logs/realtime/morning_decision.log 2>&1
+# Task#20: 修复卖出检查时序盲区: 9:31首检(覆盖开盘跳空击穿) + 10:00-15:00每30分钟(:01/:31错开整点减少接口拥堵, 11:31/15:01为半场收盘后补检); 区间判定幂等, 重复检查不重复告警
+31 9 * * 1-5 cd /home/AIWealth && python3 realtime/position_tracker.py auto-close >> logs/realtime/position_tracker.log 2>&1
+1,31 10,11,13,14 * * 1-5 cd /home/AIWealth && python3 realtime/position_tracker.py auto-close >> logs/realtime/position_tracker.log 2>&1
+1 15 * * 1-5 cd /home/AIWealth && python3 realtime/position_tracker.py auto-close >> logs/realtime/position_tracker.log 2>&1
+# AIWealth 10分钟周期进展监控 (Task #6, tools/progress_scheduler.py)
+*/10 * * * * cd /home/AIWealth && /usr/bin/python3 tools/progress_scheduler.py >> logs/realtime/progress_scheduler.log 2>&1
+
+# Task#22: 盘中10秒级实时监控守护进程(9:25拉起, 内部flock防重复+自判交易日, 15:00自然退出); 存活期间(心跳<60s)上面的position_tracker auto-close cron自动跳过, daemon挂了cron兜底接管并告警
+25 9 * * 1-5 cd /home/AIWealth && python3 realtime/intraday_monitor.py >> logs/realtime/intraday_monitor.log 2>&1

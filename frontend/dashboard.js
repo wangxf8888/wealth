@@ -1,36 +1,55 @@
 /**
  * AIWealth 回测策略 Dashboard
  * 纯前端实现，加载JSON数据，ECharts渲染图表
+ * 数据源：组合档案(frontend/data静态) + 在产5策略solo档案(server /data/solo/只读路由)
  */
 
 (function() {
   'use strict';
 
   // ===== 配置 =====
+  // 在产5策略solo档案经 server.py /data/solo/ 白名单路由读取 logs/backtest/solo/，
+  // 每周日全量刷新/参数升级重测后自动更新，无需同步。
   const STRATEGIES = {
-    combined_5slot: {
-      file: './data/combined_5slot_trades.json',
+    combined_5slot_new: {
+      file: './data/combined_5slot_new_trades.json',
       label: '5策略联合'
     },
-    combined: {
-      file: './data/combined_3strategy_trades.json',
-      label: '3策略联合'
-    },
-    limitup_early_seal: {
-      file: './data/limitup_early_seal_trades.json',
-      label: '早封涨停'
-    },
-    gem_star_late_seal: {
-      file: './data/gem_star_late_seal_trades.json',
-      label: '创科晚封涨停'
+    firstboard_low_open_dip_v2: {
+      file: '/data/solo/firstboard_low_open_dip_v2_trades.json',
+      label: '首板低吸'
     },
     amplitude_reversal: {
-      file: './data/amplitude_reversal_trades.json',
-      label: '振幅反转'
+      file: '/data/solo/amplitude_reversal_trades.json',
+      label: '巨振反转'
+    },
+    gem_star_late_seal: {
+      file: '/data/solo/gem_star_late_seal_trades.json',
+      label: '创科晚封'
+    },
+    big_yang_low_open_v2: {
+      file: '/data/solo/big_yang_low_open_v2_trades.json',
+      label: '大阳低吸'
+    },
+    two_board_pullback_dip_h1c: {
+      file: '/data/solo/two_board_pullback_dip_h1c_trades.json',
+      label: '双板回调低吸'
     }
   };
 
-  let currentStrategy = 'combined_5slot';
+  let currentStrategy = 'combined_5slot_new';
+
+  // [Task#209] 策略中文正名(server.py STRATEGY_CN镜像, 渲染层转换, 数据内部英文代号不动)
+  const STRATEGY_CN = {
+    firstboard_low_open_dip_v2: '首板低吸',
+    amplitude_reversal: '巨振反转',
+    gem_star_late_seal: '创科晚封',
+    big_yang_low_open_v2: '大阳低吸',
+    two_board_pullback_dip_h1c: '双板回调低吸',
+    early_surge_chase_0940: '早盘冲板追击',
+    limitup_early_seal: '涨停早封',
+    gem_star_limitup_low_open: '创科涨停低开'
+  };
   let dataCache = {};
   let equityChartInstance = null;
   let monthlyChartInstance = null;
@@ -57,6 +76,13 @@
   }
 
   function setupTabs() {
+    // HTML内tab为历史硬编码（含退役策略），此处按STRATEGIES动态重建
+    const tabBar = document.querySelector('.tabs');
+    if (tabBar) {
+      tabBar.innerHTML = Object.keys(STRATEGIES).map(k =>
+        `<button class="tab-btn${k === currentStrategy ? ' active' : ''}" data-strategy="${k}">${STRATEGIES[k].label}</button>`
+      ).join('');
+    }
     document.querySelectorAll('.tab-btn').forEach(btn => {
       btn.addEventListener('click', async () => {
         document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
@@ -65,6 +91,71 @@
         await loadStrategy(currentStrategy);
       });
     });
+  }
+
+  // ===== 数据适配层 =====
+  // 档案实际结构: { mode, summary|combined_summary, strategies, daily_nav{date:nav}, trades[] }
+  // trades字段: code/strategy_name/buy_date/buy_price/sell_date/sell_price/hold_hours/profit_pct/reason
+  // 此处适配为渲染层所需 { summary, trades, equity_curve, monthly_returns }，不改档案。
+  function adaptData(raw, label) {
+    const s = raw.summary || raw.combined_summary || {};
+    const initialCapital = s.initial_capital || raw.initial_capital || 1000000;
+    const slotCount = raw.n_slots || (raw.strategies ? raw.strategies.length : 1);
+
+    const summary = {
+      strategy_name: label,
+      period: (s.start_date || '?') + ' ~ ' + (s.end_date || '?'),
+      cagr_pct: s.cagr_pct != null ? s.cagr_pct : 0,
+      final_capital: s.final_nav != null ? s.final_nav : initialCapital,
+      initial_capital: initialCapital,
+      win_rate_pct: s.win_rate_pct != null ? s.win_rate_pct : 0,
+      avg_return_pct: s.avg_profit_pct != null ? s.avg_profit_pct : 0,
+      max_drawdown_pct: s.max_drawdown_pct != null ? s.max_drawdown_pct : 0,
+      total_trades: s.n_trades != null ? s.n_trades : (raw.trades || []).length,
+      fee_rate: '—',
+      slot: slotCount,
+      compliance: raw.mode || ''
+    };
+
+    const trades = (raw.trades || []).map((t, i) => ({
+      id: i + 1,
+      code: t.code || '',
+      name: t.name || '—',
+      strategy: t.strategy_name || t.strategy || '',
+      buy_date: t.buy_date || '',
+      buy_price: t.buy_price != null ? t.buy_price : 0,
+      sell_date: t.sell_date || '',
+      sell_price: t.sell_price != null ? t.sell_price : 0,
+      sell_reason: t.reason || t.sell_reason || '',
+      return_pct: t.profit_pct != null ? t.profit_pct : (t.return_pct != null ? t.return_pct : 0),
+      hold_hours: t.hold_hours != null ? t.hold_hours : 0,
+      capital_after: t.capital_after != null ? t.capital_after : null
+    }));
+
+    // daily_nav dict → equity_curve[{date, capital}]
+    const nav = raw.daily_nav || {};
+    const navDates = Object.keys(nav).sort();
+    const equity_curve = navDates.map(d => ({ date: d, capital: nav[d] }));
+
+    // daily_nav → 月度收益（月末nav环比）
+    const monthly_returns = [];
+    let prevMonthNav = initialCapital;
+    let curMonth = null;
+    let lastNav = initialCapital;
+    navDates.forEach(d => {
+      const m = d.substring(0, 7);
+      if (curMonth !== null && m !== curMonth) {
+        monthly_returns.push({ month: curMonth, return_pct: (lastNav / prevMonthNav - 1) * 100 });
+        prevMonthNav = lastNav;
+      }
+      curMonth = m;
+      lastNav = nav[d];
+    });
+    if (curMonth !== null) {
+      monthly_returns.push({ month: curMonth, return_pct: (lastNav / prevMonthNav - 1) * 100 });
+    }
+
+    return { summary, trades, equity_curve, monthly_returns };
   }
 
   async function loadStrategy(key) {
@@ -77,12 +168,13 @@
     }
 
     loadingMsg.style.display = 'flex';
-    mainContent.style.display = 'none';
+    if (mainContent) mainContent.style.display = 'none';
 
     try {
       const resp = await fetch(STRATEGIES[key].file);
       if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
-      const data = await resp.json();
+      const raw = await resp.json();
+      const data = adaptData(raw, STRATEGIES[key].label);
       dataCache[key] = data;
       renderAll(data);
     } catch (e) {
@@ -333,11 +425,11 @@
   function renderTradeTable(trades) {
     filteredTrades = [...trades];
 
-    // 填充策略过滤下拉
+    // 填充策略过滤下拉(value保持英文代号, 展示用中文正名)
     const strategies = [...new Set(trades.map(t => t.strategy))];
     const filterSel = document.getElementById('filterStrategy');
     filterSel.innerHTML = '<option value="all">全部策略</option>' +
-      strategies.map(s => `<option value="${s}">${s}</option>`).join('');
+      strategies.map(s => `<option value="${s}">${STRATEGY_CN[s] || s}</option>`).join('');
 
     // 绑定事件
     document.getElementById('searchInput').oninput = () => applyFilters(trades);
@@ -388,6 +480,8 @@
     const asc = currentSort.asc;
     filteredTrades.sort((a, b) => {
       let va = a[col], vb = b[col];
+      if (va == null) va = -Infinity;
+      if (vb == null) vb = -Infinity;
       if (typeof va === 'string') {
         return asc ? va.localeCompare(vb) : vb.localeCompare(va);
       }
@@ -397,7 +491,8 @@
     document.getElementById('tradeCount').textContent = `显示 ${filteredTrades.length} 笔`;
 
     const tbody = document.getElementById('tradeBody');
-    const fmtCap = v => v >= 10000000 ? (v/10000000).toFixed(2)+'千万' :
+    const fmtCap = v => v == null ? '—' :
+                        v >= 10000000 ? (v/10000000).toFixed(2)+'千万' :
                         v >= 10000 ? (v/10000).toFixed(1)+'万' : v.toFixed(0);
 
     tbody.innerHTML = filteredTrades.map(t => {
@@ -406,7 +501,7 @@
         <td>${t.id}</td>
         <td>${t.code}</td>
         <td>${t.name}</td>
-        <td>${t.strategy}</td>
+        <td>${STRATEGY_CN[t.strategy] || t.strategy}</td>
         <td>${t.buy_date}</td>
         <td>${t.buy_price.toFixed(2)}</td>
         <td>${t.sell_date}</td>

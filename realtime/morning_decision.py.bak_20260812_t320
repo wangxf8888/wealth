@@ -1,0 +1,1728 @@
+#!/usr/bin/env python3
+"""
+早盘决策 (每个交易日9:25触发)
+==================================
+策略无关框架 - 读取晚间候选，获取实时开盘价，调用各策略标准接口决定买入。
+
+**动态再平衡模式**:
+- 买入金额 = total_nav / 5 (与回测引擎 portfolio.py 一致)
+- total_nav = 现金 + 所有持仓市值
+- 不是让每个slot独立运行
+
+新增策略 = 修改config.py + 放策略文件到strategies/ → 无需改此文件。
+
+用法:
+  实盘:  python realtime/morning_decision.py
+  测试:  python realtime/morning_decision.py --test-date 2026-07-18
+"""
+import sys
+import os
+import json
+import importlib
+import argparse
+import sqlite3
+import urllib.request
+import re
+import math
+from datetime import datetime, timedelta
+
+PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, PROJECT_ROOT)
+
+import trading_rules
+from execution_core import evaluate_open_entry
+from realtime.config import (ACTIVE_STRATEGIES, DATA_DB, OUTPUT_DIR, LOG_DIR,
+                             TOTAL_CAPITAL, MAX_SLOT_PER_STRATEGY,
+                             MARKET_FILTER_THRESHOLD,
+                             POSITION_SCALE_ENABLED, POSITION_SCALE_ICE,
+                             POSITION_SCALE_W, VC_DYNAMIC_SLOTS,
+                             REPAIR_EXEMPT_ENABLED,
+                             DRAWDOWN_BOOST_ENABLED, DRAWDOWN_BOOST_X,
+                             DRAWDOWN_BOOST_W, DRAWDOWN_BOOST_STATE_FILE,
+                             strategy_display_name)
+from realtime.data_feed import RealtimeDataFeed
+from realtime.position_tracker import load_positions, get_buy_amount
+# 修复日豁免口径常量/可买过滤同源import(回测/实盘单一来源, 2026-07-31批准)
+from backtest.position_scale import (REPAIR_GATE, REPAIR_OPEN_LO,
+                                     REPAIR_OPEN_HI, REPAIR_MIN_HIST,
+                                     REPAIR_MIN_AMT, REPAIR_W1_DROP,
+                                     REPAIR_W3_POS, REPAIR_CONFIDENCE_NOTE,
+                                     repair_open_buyable)
+
+# [Task#285] 策略冻结名单(用户批准A案2026-08-11): 防御式导入,
+# 配置缺失/任何异常降级为不冻结(空名单), 不炸决策主链
+# (与load_user_excluded双层过滤同安全降级风格)
+try:
+    from realtime.config import STRATEGY_FROZEN
+except Exception as _e:
+    print(f"[ERROR][S3冻结] STRATEGY_FROZEN配置读取异常({_e!r}), "
+          f"降级为不冻结继续")
+    STRATEGY_FROZEN = []
+
+
+# =============================================================================
+# 用户排除名单(Task#205新增, 双保险第二层; 第一层在generate_candidates生成层)
+# 文件由生成层维护, 本处只读; 缺失/损坏→安全跳过(空名单), 绝不炸主链
+# =============================================================================
+
+USER_EXCLUDED_FILE = os.path.join(OUTPUT_DIR, 'user_excluded.json')
+
+# [Task#253] 公告预警文件(tools/announcement_monitor.py维护, 本处只读)
+ANN_ALERTS_FILE = os.path.join(OUTPUT_DIR, 'ann_alerts.json')
+
+
+def load_user_excluded(trade_date: str) -> set:
+    """读取当日用户排除名单, 结构{"YYYY-MM-DD": ["sh.688549", ...]}。
+
+    任何异常(文件缺失/JSON损坏/结构不符)一律降级为空集合并留ERROR日志,
+    保证决策主链不因排除名单文件问题中断。
+    """
+    try:
+        if not os.path.exists(USER_EXCLUDED_FILE):
+            return set()
+        with open(USER_EXCLUDED_FILE, encoding='utf-8') as f:
+            data = json.load(f)
+        codes = data.get(trade_date) or []
+        excluded = {str(c).strip() for c in codes if c}
+        if excluded:
+            print(f"[用户排除] {trade_date} 排除名单生效: {sorted(excluded)}")
+        return excluded
+    except Exception as e:
+        print(f"[ERROR][用户排除] 读取{USER_EXCLUDED_FILE}异常({e!r}), "
+              f"降级为空名单继续")
+        return set()
+
+
+def load_ann_alerts(trade_date: str) -> dict:
+    """[Task#253] 读取当日公告预警, 返回{code: title}。
+
+    兜底铁律: 文件缺失/损坏/结构不符/巨潮接口失败(无文件)一律降级为空
+    ={不排除任何候选}, 主链照常, 只留告警日志。
+    """
+    try:
+        if not os.path.exists(ANN_ALERTS_FILE):
+            return {}
+        with open(ANN_ALERTS_FILE, encoding='utf-8') as f:
+            data = json.load(f)
+        day = data.get(trade_date) or []
+        if not isinstance(day, list):
+            return {}
+        out = {}
+        for h in day:
+            if isinstance(h, dict) and h.get('code'):
+                out.setdefault(str(h['code']), str(h.get('title', '')))
+        if out:
+            print(f"[公告预警] {trade_date} 预警名单生效: {sorted(out)}")
+        return out
+    except Exception as e:
+        print(f"[ERROR][公告预警] 读取{ANN_ALERTS_FILE}异常({e!r}), "
+              f"降级为空名单继续(不排除任何候选)")
+        return {}
+
+
+def load_earnings_block_map():
+    """[Task#297] 读预约披露日历, 返回{code: [appoint_date,...]}(第三层过滤源)。
+
+    用户直接指令: 持股期间会触发业绩公告的不买, 避免碰雷。
+    兜底铁律(与load_ann_alerts同风格): 日历缺失/损坏/过期(>3天未刷新)
+    一律降级为空={不拦截任何候选}, 主链照常, 只留告警日志。
+    """
+    try:
+        from realtime.earnings_calendar import load_earnings_calendar
+        by_code, err = load_earnings_calendar()
+        if err:
+            print(f"[ERROR][财报拦截] {err}, fail-open不拦截任何候选, "
+                  f"需核查tools/fetch_earnings_calendar.py")
+            return {}
+        return by_code
+    except Exception as e:
+        print(f"[ERROR][财报拦截] 日历读取异常({e!r}), "
+              f"降级为不拦截继续")
+        return {}
+
+
+# =============================================================================
+# 策略动态加载
+# =============================================================================
+
+def load_strategy(cfg: dict):
+    """动态import策略类并实例化。"""
+    module = importlib.import_module(cfg['module'])
+    cls = getattr(module, cfg['class'])
+    return cls()
+
+
+def get_strategy_config_by_slot(slot_id: str) -> dict:
+    """通过slot_id查找策略配置。"""
+    for cfg in ACTIVE_STRATEGIES:
+        if cfg['slot_id'] == slot_id and cfg['enabled']:
+            return cfg
+    return None
+
+
+def get_strategy_config_by_name(name: str) -> dict:
+    """通过strategy_name查找策略配置。"""
+    for cfg in ACTIVE_STRATEGIES:
+        if not cfg['enabled']:
+            continue
+        try:
+            mod = importlib.import_module(cfg['module'])
+            cls = getattr(mod, cfg['class'])
+            instance = cls()
+            if instance.name == name:
+                return cfg
+        except Exception:
+            pass
+    return None
+
+
+# =============================================================================
+# 实时开盘价获取
+# =============================================================================
+
+def code_to_sina(code: str) -> str:
+    """sh.600000 → sh600000"""
+    return code.replace('.', '')
+
+
+def sina_to_code(sina_code: str) -> str:
+    """sh600000 → sh.600000"""
+    return sina_code[:2] + '.' + sina_code[2:]
+
+
+def _fetch_from_tencent(codes: list) -> dict:
+    """通过腾讯实时行情接口获取开盘价+昨收。
+
+    返回 {code: {'open': float, 'preclose': float}}。
+    parts[5]=今开, parts[4]=昨收(交易所口径, 除权除息日为除权参考价,
+    与信号日库内close对比即可识别除权, Task#4实盘侧拦截用)。
+    """
+    results = {}
+    tencent_codes = [code_to_sina(c) for c in codes]
+    batch_size = 50
+
+    for i in range(0, len(tencent_codes), batch_size):
+        batch = tencent_codes[i:i + batch_size]
+        url = f"http://qt.gtimg.cn/q={','.join(batch)}"
+        try:
+            req = urllib.request.Request(url)
+            req.add_header('User-Agent',
+                           'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36')
+            resp = urllib.request.urlopen(req, timeout=10)
+            content = resp.read().decode('gbk')
+            for line in content.strip().split('\n'):
+                line = line.strip()
+                if not line:
+                    continue
+                m = re.match(r'v_(\w+)="(.*)"', line)
+                if not m:
+                    continue
+                tencent_sym = m.group(1)
+                data_str = m.group(2)
+                if not data_str:
+                    continue
+                parts = data_str.split('~')
+                if len(parts) < 6:
+                    continue
+                code = sina_to_code(tencent_sym)
+                try:
+                    open_price = float(parts[5]) if parts[5] else 0
+                except (ValueError, IndexError):
+                    open_price = 0
+                try:
+                    preclose = float(parts[4]) if parts[4] else 0
+                except (ValueError, IndexError):
+                    preclose = 0
+                if open_price > 0:
+                    results[code] = {'open': open_price, 'preclose': preclose}
+        except Exception as e:
+            print(f"  [WARN] 腾讯接口请求失败: {e}")
+    return results
+
+
+def _fetch_from_sina(codes: list) -> dict:
+    """通过Sina实时行情快照接口获取今开+昨收(备用, Task#38重写)。
+
+    背景(DIAG_20260724): 旧实现用K线接口scale=60&datalen=1, 语义是"最后
+    一根已完成的60分K"——9:25当日首根bar尚未形成, 返回的是昨日hour4 bar,
+    open≈昨收 → open_rate≈0% → 候选被全量误过滤(周四漏买2只)。
+
+    新实现(2026-07-25实测定型):
+    - hq.sinajs.cn 403、quotes.sina.cn点查服务均已下线, 唯一可用的是
+      vip.stock.finance.sina.com.cn 的 Market_Center.getHQNodeData
+      板块分页快照(单页硬上限100条, sort=symbol全局升序, sh_a含688)。
+    - 字段语义(周五静态数据与stock_kline逐位对照验证): open=今开,
+      settlement=昨收, trade=现价, ticktime=行情时刻。
+    - 无法按symbol点查 → 按node(sh_a/sz_a/bj_a)分页二分定位目标代码,
+      页结果进程内缓存, 20只候选实测约10~15次请求/5秒内。
+
+    返回 {code: {'open': float, 'preclose': float}}, 与腾讯源同构。
+    """
+    results = {}
+    import json as _json
+    base_url = ("https://vip.stock.finance.sina.com.cn/quotes_service/api/"
+                "json_v2.php/Market_Center.")
+
+    def _get_json(url):
+        req = urllib.request.Request(url)
+        req.add_header('Referer', 'https://finance.sina.com.cn')
+        req.add_header('User-Agent',
+                       'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36')
+        resp = urllib.request.urlopen(req, timeout=8)
+        return _json.loads(resp.read().decode('utf-8'))
+
+    # 按交易所node分组: sh.688618 → node=sh_a 内查 sh688618
+    node_map = {'sh': 'sh_a', 'sz': 'sz_a', 'bj': 'bj_a'}
+    by_node = {}
+    for code in codes:
+        node = node_map.get(code[:2])
+        if node:
+            by_node.setdefault(node, []).append(code_to_sina(code))
+
+    page_cache = {}  # {(node, page): rows}
+
+    def _fetch_page(node, page):
+        key = (node, page)
+        if key not in page_cache:
+            page_cache[key] = _get_json(
+                f"{base_url}getHQNodeData?page={page}&num=100"
+                f"&sort=symbol&asc=1&node={node}")
+        return page_cache[key]
+
+    for node, syms in by_node.items():
+        # 页数上界: getHQNodeStockCount, 失败则保守估60页(6000只)
+        try:
+            cnt = int(str(_get_json(
+                f"{base_url}getHQNodeStockCount?node={node}")).strip('"'))
+            n_pages = max(1, (cnt + 99) // 100)
+        except Exception:
+            n_pages = 60
+
+        for sym in sorted(syms):
+            try:
+                lo, hi, row = 1, n_pages, None
+                while lo <= hi:
+                    mid = (lo + hi) // 2
+                    rows = _fetch_page(node, mid)
+                    if not rows:
+                        hi = mid - 1
+                        continue
+                    if sym < rows[0]['symbol']:
+                        hi = mid - 1
+                    elif sym > rows[-1]['symbol']:
+                        lo = mid + 1
+                    else:
+                        row = next((r for r in rows if r['symbol'] == sym),
+                                   None)
+                        break
+                if row:
+                    open_price = float(row.get('open', 0) or 0)
+                    preclose = float(row.get('settlement', 0) or 0)
+                    if open_price > 0:
+                        results[sina_to_code(sym)] = {
+                            'open': open_price, 'preclose': preclose}
+            except Exception:
+                pass  # 逐只失败不打印，最后汇总
+
+    if not results:
+        print(f"  [WARN] Sina快照接口全部失败")
+    return results
+
+
+def fetch_realtime_open_prices(codes: list, max_retries: int = 5,
+                               retry_interval: int = 10) -> dict:
+    """获取实时开盘价+昨收 - 增量重试确保尽可能全部获取。
+
+    返回 {code: {'open': float, 'preclose': float}} (Task#38起两源同构;
+    preclose为交易所口径昨收, 供除权除息拦截)。
+
+    逻辑:
+    1. 每轮先用腾讯接口获取remaining中未拿到的
+    2. 腾讯拿不到的用Sina备用接口继续获取
+    3. 还有剩余则等待retry_interval秒后重试(竞价数据可能延迟就绪)
+    4. 最多重试max_retries轮，总耗时不超过 max_retries * retry_interval 秒
+
+    9:25触发 → 最多9:25+50s≈9:26完成，远在9:30正式开盘前。
+    """
+    import time
+    if not codes:
+        return {}
+
+    results = {}
+    remaining = list(codes)
+
+    for attempt in range(1, max_retries + 1):
+        if not remaining:
+            break
+
+        # --- 腾讯接口 ---
+        print(f"  [第{attempt}/{max_retries}轮] 腾讯接口获取 {len(remaining)} 只...")
+        tencent_got = _fetch_from_tencent(remaining)
+        if tencent_got:
+            results.update(tencent_got)
+            remaining = [c for c in remaining if c not in results]
+            print(f"    腾讯本轮获取 {len(tencent_got)} 只，累计 {len(results)}/{len(codes)}")
+
+        if not remaining:
+            break
+
+        # --- Sina备用接口 ---
+        print(f"    Sina备用接口获取剩余 {len(remaining)} 只...")
+        sina_got = _fetch_from_sina(remaining)
+        if sina_got:
+            results.update(sina_got)
+            remaining = [c for c in remaining if c not in results]
+            print(f"    Sina本轮获取 {len(sina_got)} 只，累计 {len(results)}/{len(codes)}")
+
+        if not remaining:
+            break
+
+        # --- 还有剩余，等待后重试 ---
+        if attempt < max_retries:
+            print(f"    还有 {len(remaining)} 只未获取到，{retry_interval}秒后重试... "
+                  f"(未获取: {remaining[:5]}{'...' if len(remaining) > 5 else ''})")
+            time.sleep(retry_interval)
+
+    # 最终汇总
+    if remaining:
+        print(f"  [WARN] {max_retries}轮后仍有 {len(remaining)} 只未获取到开盘价: {remaining}")
+    else:
+        print(f"  [OK] 全部 {len(codes)} 只开盘价获取完成")
+
+    return results
+
+
+def fetch_test_open_prices(conn, codes: list, test_date: str) -> dict:
+    """从数据库获取指定日期的开盘价+昨收(测试模式)。
+
+    返回 {code: {'open': float, 'preclose': float}}, 与实时源同构。
+    preclose取stock_kline当日行(BaoStock交易所口径, 除权日=除权参考价),
+    与实盘行情接口昨收语义一致, 除权拦截在测试模式下同样可复现。
+    """
+    if not codes:
+        return {}
+    results = {}
+    # 分块查询: 修复日豁免的昨日弱势池可达2600+只, 一次IN会撞SQLite
+    # 999变量上限(SQLITE_MAX_VARIABLE_NUMBER) → "too many SQL variables"
+    for i in range(0, len(codes), 500):
+        chunk = codes[i:i + 500]
+        placeholders = ','.join(['?' for _ in chunk])
+        cur = conn.execute(f"""
+            SELECT code, open, preclose FROM stock_kline
+            WHERE date = ? AND code IN ({placeholders})
+        """, [test_date] + chunk)
+        for row in cur.fetchall():
+            code, open_p, preclose = row
+            if open_p and open_p > 0:
+                results[code] = {'open': open_p, 'preclose': preclose or 0}
+    return results
+
+
+# =============================================================================
+# 大盘过滤
+# =============================================================================
+
+def check_market_filter(conn, trade_date: str) -> bool:
+    """前日上证指数大跌则今日不开新仓。返回True=应跳过。
+
+    防护措施:
+    - 如果index_kline数据陈旧(距trade_date超过10个自然日)，视为数据缺失，不过滤
+    - 如果stock_kline中有上证数据(preclose/close)，作为备用数据源
+    """
+    # 主路径: 从index_kline获取
+    prev_date, close_rate = None, None
+    cur = conn.execute("""
+        SELECT date, close_rate FROM index_kline
+        WHERE code='sh.000001' AND date < ?
+        ORDER BY date DESC LIMIT 1
+    """, (trade_date,))
+    row = cur.fetchone()
+    if row:
+        prev_date, close_rate = row
+
+    # 备用路径: 从stock_kline获取上证(如果有)
+    if prev_date is None or close_rate is None:
+        cur2 = conn.execute("""
+            SELECT date, close, preclose FROM stock_kline
+            WHERE code='sh.000001' AND date < ?
+            ORDER BY date DESC LIMIT 1
+        """, (trade_date,))
+        row2 = cur2.fetchone()
+        if row2 and row2[1] and row2[2] and row2[2] > 0:
+            prev_date = row2[0]
+            close_rate = (row2[1] / row2[2] - 1) * 100
+
+    # 无数据 -> 不过滤
+    if prev_date is None or close_rate is None:
+        print(f"  [大盘过滤] 未找到上证指数数据，跳过过滤")
+        return False
+
+    # 新鲜度校验: 数据距trade_date超过10个自然日视为陈旧
+    try:
+        trade_dt = datetime.strptime(trade_date, '%Y-%m-%d')
+        prev_dt = datetime.strptime(prev_date, '%Y-%m-%d')
+        days_gap = (trade_dt - prev_dt).days
+        if days_gap > 10:
+            print(f"  [大盘过滤] 指数数据陈旧(最新{prev_date}，距今{days_gap}天)，跳过过滤")
+            return False
+    except ValueError:
+        print(f"  [大盘过滤] 日期解析异常({prev_date})，跳过过滤")
+        return False
+
+    triggered = close_rate < MARKET_FILTER_THRESHOLD
+    if triggered:
+        print(f"  [大盘过滤] {prev_date} 上证跌{close_rate:.2f}% > 阈值{abs(MARKET_FILTER_THRESHOLD):.1f}%")
+        print(f"  ★★★ 大盘暴跌过滤，今日不开新仓 ★★★")
+    else:
+        print(f"  [大盘过滤] {prev_date} 上证{close_rate:+.2f}%，正常开仓")
+    return triggered
+
+
+# =============================================================================
+# 冰点减仓overlay (Task#68, 替换大盘熔断)
+# =============================================================================
+
+def compute_position_scale(conn, trade_date: str) -> dict:
+    """冰点减仓overlay: 昨日非ST涨停家数<ICE → 当日新开仓买入金额×W。
+
+    口径与回测 backtest/position_scale.PositionScaler 完全一致:
+    D-1 = stock_kline中严格早于trade_date的最后一个交易日, isST=0过滤,
+    trading_rules.is_at_limit_up(code, close, preclose) 逐行计数。
+
+    fail-safe: 昨日日K缺失/陈旧(>10自然日) → 系数1.0满仓 +
+    scheduler_alerts告警(宁少减仓不拒单, PLAN_TASK44_POSITION_SCALE_LIVE)。
+    返回 {'prev_date','limitup_cnt','scale'} 供决策json审计留痕。
+    """
+    if not POSITION_SCALE_ENABLED:
+        return {'prev_date': None, 'limitup_cnt': None, 'scale': 1.0}
+    prev_date, cnt = None, None
+    try:
+        row = conn.execute(
+            "SELECT MAX(date) FROM stock_kline WHERE date < ?",
+            (trade_date,)).fetchone()
+        prev_date = row[0] if row else None
+        if prev_date:
+            days_gap = (datetime.strptime(trade_date, '%Y-%m-%d')
+                        - datetime.strptime(prev_date, '%Y-%m-%d')).days
+            if days_gap > 10:
+                print(f"  [冰点overlay] 日K陈旧(最新{prev_date}, 距今"
+                      f"{days_gap}天), 降级满仓")
+                prev_date = None
+        if prev_date:
+            cnt = 0
+            for code, close, preclose in conn.execute(
+                    "SELECT code, close, preclose FROM stock_kline "
+                    "WHERE date=? AND isST=0", (prev_date,)):
+                if trading_rules.is_at_limit_up(code, close, preclose):
+                    cnt += 1
+    except (sqlite3.Error, ValueError) as e:
+        print(f"  [冰点overlay] 计算异常({e}), 降级满仓")
+        prev_date, cnt = None, None
+
+    if cnt is None:
+        # fail-safe: 涨停家数不可得 → 满仓 + 告警人工巡检
+        try:
+            from realtime.position_tracker import SCHEDULER_ALERT_LOG
+            with open(SCHEDULER_ALERT_LOG, 'a', encoding='utf-8') as f:
+                f.write(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] "
+                        f"⚠️ 冰点overlay降级: {trade_date} 昨日涨停家数"
+                        f"不可得(日K缺失/陈旧), 按系数1.0满仓\n")
+        except OSError:
+            pass
+        return {'prev_date': prev_date, 'limitup_cnt': None, 'scale': 1.0}
+
+    trig = cnt < POSITION_SCALE_ICE
+    scale = POSITION_SCALE_W if trig else 1.0
+    print(f"  [冰点overlay] 昨日({prev_date})非ST涨停家数={cnt} "
+          f"{'<' if trig else '>='}{POSITION_SCALE_ICE} → 当日买入系数={scale}")
+    if trig:
+        print(f"  ★ 冰点减仓: 今日新开仓金额×{POSITION_SCALE_W}")
+    return {'prev_date': prev_date, 'limitup_cnt': cnt, 'scale': scale}
+
+
+# =============================================================================
+# 修复日豁免 (2026-07-31批准, RESEARCH_REPAIR_GATE.md §4)
+# =============================================================================
+
+# 昨日锚SQL: 9:25时点stock_kline尚无当日行, 以昨日行锚定W1&W3池
+# (窗口/深度与回测口径换算: 截至昨日20行=研究[d-20,d-1]窗口;
+#  nprev>=24 = 研究nhist>=25去掉当日行)
+_REPAIR_POOL_Q_LIVE = """
+WITH h AS (
+  SELECT code, date, close, close_rate, amount, isST,
+         MIN(low)  OVER w20 AS low20,
+         MAX(high) OVER w20 AS high20,
+         COUNT(*)  OVER (PARTITION BY code ORDER BY date
+                         ROWS BETWEEN 23 PRECEDING AND CURRENT ROW) AS nprev
+  FROM stock_kline
+  WHERE date <= :prev AND date >= :warmup
+  WINDOW w20 AS (PARTITION BY code ORDER BY date
+                 ROWS BETWEEN 19 PRECEDING AND CURRENT ROW)
+)
+SELECT code, close FROM h
+WHERE date = :prev AND isST = 0 AND close > 0
+  AND close_rate <= :w1_drop AND amount >= :min_amt AND nprev >= :min_prev
+  AND high20 > 0 AND close <= low20 + (high20 - low20) * :w3_pos
+"""
+
+
+def query_repair_pool(conn, prev_date: str) -> dict:
+    """昨日锚W1&W3池: {code: 昨日close}。9:25可算(只依赖截至昨日的日K)。"""
+    warmup = (datetime.strptime(prev_date, '%Y-%m-%d')
+              - timedelta(days=120)).strftime('%Y-%m-%d')
+    return dict(conn.execute(_REPAIR_POOL_Q_LIVE, {
+        'prev': prev_date, 'warmup': warmup,
+        'w1_drop': REPAIR_W1_DROP, 'min_amt': REPAIR_MIN_AMT,
+        'min_prev': REPAIR_MIN_HIST - 1, 'w3_pos': REPAIR_W3_POS}))
+
+
+def judge_repair_day(conn, prev_date: str, quote_fn,
+                     gate: int = REPAIR_GATE,
+                     min_coverage: float = 0.8) -> dict:
+    """9:25实盘修复日判定(仅冰点触发日调用, 失败安全降级为不豁免)。
+
+    quote_fn(codes)->{code:{'open','preclose'}}:
+      实盘 = fetch_realtime_open_prices(腾讯batch=50+Sina备用)
+      测试 = fetch_test_open_prices(conn, codes, test_date)
+    浅高开口径: open_rate=(open/preclose-1)*100 ∈ [2,3), preclose优先行情
+    交易所口径, 缺失回退昨日库内close; 开盘可买过滤与研究口径逐位一致。
+    降级条件(任一→is_repair=False不豁免, degraded留痕):
+      SQL异常 / quote_fn异常 / 竞价覆盖率<min_coverage。
+    返回留痕dict(写入decision json position_scale.repair_exempt)。
+    """
+    res = {'pool_size': None, 'quotes_got': None, 'shallow_cnt': None,
+           'gate': gate, 'is_repair': False, 'degraded': None,
+           'confidence_note': REPAIR_CONFIDENCE_NOTE}
+    try:
+        pool = query_repair_pool(conn, prev_date)
+    except sqlite3.Error as e:
+        res['degraded'] = f'W1&W3池SQL异常: {e}'
+        return res
+    res['pool_size'] = len(pool)
+    if len(pool) < gate:
+        # 池本身不足gate → 必然非修复日, 无需拉行情(省流量)
+        res['quotes_got'] = 0
+        res['shallow_cnt'] = 0
+        return res
+    try:
+        quotes = quote_fn(sorted(pool)) or {}
+    except Exception as e:
+        res['degraded'] = f'竞价行情获取异常: {e}'
+        return res
+    res['quotes_got'] = len(quotes)
+    if len(quotes) < len(pool) * min_coverage:
+        res['degraded'] = (f'竞价覆盖率不足: {len(quotes)}/{len(pool)}'
+                           f'<{min_coverage:.0%}, 不豁免')
+        return res
+    cnt = 0
+    for code, q in quotes.items():
+        open_p = q.get('open') or 0
+        preclose = q.get('preclose') or 0
+        if preclose <= 0:
+            preclose = pool.get(code) or 0     # 行情昨收缺失→库内昨close
+        if open_p <= 0 or preclose <= 0:
+            continue
+        open_rate = (open_p / preclose - 1) * 100
+        if not (REPAIR_OPEN_LO <= open_rate < REPAIR_OPEN_HI):
+            continue
+        if repair_open_buyable(code, open_p, preclose):
+            cnt += 1
+    res['shallow_cnt'] = cnt
+    res['is_repair'] = cnt >= gate
+    return res
+
+
+def compute_final_scale(conn, trade_date: str, quote_fn=None) -> dict:
+    """Task#73接线: 冰点overlay × 回撤作战手册叠乘, 单一口径供9:25决策
+    与早间计划报告(tools/daily_plan_report)共用, 禁止各自另算第二套口径。
+
+    修复日豁免(2026-07-31批准, RESEARCH_REPAIR_GATE §4): 仅冰点触发日且
+    quote_fn可用时判定; 命中→冰点系数豁免恢复1.0(再与回撤侧叠乘)。
+    quote_fn缺省(报告侧daily_plan_report)=不判定, 维持冰点口径(B4零改动),
+    最终值由decision json留痕。
+
+    回撤侧读 tools/drawdown_guard.get_live_scale()(盘后19:00 strategy_health
+    快照落盘的状态); 状态缺失/异常 → 安全降级L0(1.0, 无白名单),
+    final=ice, 零影响交易主链。叠乘用drawdown_guard.combine_scale
+    (下限0.1; 熔断dd=0时直接0不套floor)。
+
+    返回decision json 'position_scale'字段(全留痕):
+      {prev_date, limitup_cnt, scale(=冰点含豁免后, 兼容旧读方),
+       ice_scale, repair_exempt(None|判定留痕dict), drawdown_scale,
+       drawdown_level, whitelist(None|list), halt, final_scale}
+    """
+    ice = compute_position_scale(conn, trade_date)
+    ice_eff = ice['scale']
+    repair_info = None
+    if (REPAIR_EXEMPT_ENABLED and quote_fn is not None
+            and ice_eff < 1.0 and ice.get('prev_date')):
+        repair_info = judge_repair_day(conn, ice['prev_date'], quote_fn)
+        if repair_info['is_repair']:
+            ice_eff = 1.0
+            print(f"  ★ [修复日豁免] 浅高开{repair_info['shallow_cnt']}只"
+                  f">=gate{repair_info['gate']} → 冰点减仓豁免, 恢复满仓"
+                  f" (低置信度警示已留痕)")
+        elif repair_info.get('degraded'):
+            print(f"  [修复日豁免] 降级不豁免: {repair_info['degraded']}")
+    try:
+        from tools import drawdown_guard
+        dd_scale, whitelist = drawdown_guard.get_live_scale()
+        try:
+            _st = json.load(open(drawdown_guard.STATE_FILE))
+            dd_level = _st.get('level', 0)
+            halt = bool(_st.get('halt', False))
+        except (OSError, ValueError):
+            dd_level, halt = 0, False
+        final = drawdown_guard.combine_scale(ice_eff, dd_scale)
+        level_desc = drawdown_guard.LEVEL_DESC.get(dd_level, str(dd_level))
+    except Exception as e:                  # 安全降级: 接线异常不阻断决策
+        print(f"  [回撤guard] 状态读取异常({e!r}), 安全降级L0满系数")
+        dd_scale, whitelist, dd_level, halt = 1.0, None, 0, False
+        final, level_desc = ice_eff, 'L0正常(降级)'
+    out = dict(ice)
+    out.update({'scale': ice_eff, 'ice_scale': ice_eff,
+                'repair_exempt': repair_info,
+                'drawdown_scale': dd_scale,
+                'drawdown_level': dd_level, 'whitelist': whitelist,
+                'halt': halt, 'final_scale': final})
+    if dd_scale != 1.0 or halt:
+        print(f"  [回撤guard] {level_desc}: 回撤系数×{dd_scale}"
+              + (f", 仅白名单{whitelist}可开新仓" if whitelist else "")
+              + (" — 熔断停止一切新开仓" if halt else ""))
+        print(f"  ★ 最终买入系数 = 冰点{ice_eff} × 回撤{dd_scale} → "
+              f"{final} (floor 0.1)")
+    else:
+        print(f"  [回撤guard] {level_desc}, 最终买入系数={final}")
+    return out
+
+
+# =============================================================================
+# 回撤加仓 drawdown-boost (Task#205, t174 ENGINE_REPORT §8冻结参数)
+# =============================================================================
+
+def apply_drawdown_boost(pos_scale: dict) -> dict:
+    """回撤加仓boost: 读盘后落盘的 data/drawdown_state.json 状态机,
+    满足全部条件 → final_scale × DRAWDOWN_BOOST_W(1.5, =0.3×NAV天然
+    等于单仓cap上限):
+      ① boost_active=true(盘后状态机: dd>=15%进入, nav回峰值dd<=0退出)
+      ② 非冰点日: D-1非ST涨停家数>=ICE —— 与冰点判定同源, 复用
+        pos_scale['limitup_cnt']同一次计算; 不可得(降级日)保守不boost
+      ③ 无其它减仓在身(final_scale>=1.0): 冰点ice优先/回撤guard L1-L3
+        优先, boost一律让位(ENGINE_REPORT §8 ice优先语义)
+    铁律兜底: 状态缺失/损坏/任何异常 → 不加仓按原系数运行+ERROR日志。
+    留痕写入 pos_scale['boost'] (decision json审计链)。
+    """
+    boost = {'enabled': DRAWDOWN_BOOST_ENABLED, 'active': False,
+             'factor': 1.0, 'drawdown_pct': None, 'nav_peak': None,
+             'skip_reason': None}
+    try:
+        if not DRAWDOWN_BOOST_ENABLED:
+            boost['skip_reason'] = 'disabled'
+            pos_scale['boost'] = boost
+            return pos_scale
+        try:
+            with open(DRAWDOWN_BOOST_STATE_FILE, encoding='utf-8') as f:
+                st = json.load(f)
+            if not isinstance(st, dict):
+                raise ValueError('drawdown_state非dict')
+        except Exception as e:
+            print(f"  [boost] 状态文件读取失败({e!r}), "
+                  f"按boost_active=false正常运行")
+            boost['skip_reason'] = f'state_unreadable: {e!r}'
+            pos_scale['boost'] = boost
+            return pos_scale
+        boost['drawdown_pct'] = st.get('drawdown_pct')
+        boost['nav_peak'] = st.get('nav_peak')
+        if not bool(st.get('boost_active')):
+            boost['skip_reason'] = 'boost_active=false'
+            pos_scale['boost'] = boost
+            return pos_scale
+        cnt = pos_scale.get('limitup_cnt')
+        if cnt is None or cnt < POSITION_SCALE_ICE:
+            boost['skip_reason'] = (f'冰点日ice优先boost让位'
+                                    f'(limitup_cnt={cnt})')
+            print(f"  [boost] 回撤{st.get('drawdown_pct')}%处于boost态, "
+                  f"但{boost['skip_reason']}")
+            pos_scale['boost'] = boost
+            return pos_scale
+        if pos_scale.get('final_scale', 1.0) < 1.0 or pos_scale.get('halt'):
+            boost['skip_reason'] = (f"其它减仓在身让位"
+                                    f"(final_scale={pos_scale.get('final_scale')}"
+                                    f", halt={pos_scale.get('halt')})")
+            print(f"  [boost] {boost['skip_reason']}")
+            pos_scale['boost'] = boost
+            return pos_scale
+        pos_scale['final_scale'] = round(
+            pos_scale['final_scale'] * DRAWDOWN_BOOST_W, 4)
+        boost['active'] = True
+        boost['factor'] = DRAWDOWN_BOOST_W
+        print(f"  ★ [boost] 回撤加仓生效: 盘后回撤"
+              f"{st.get('drawdown_pct')}%>=阈值{DRAWDOWN_BOOST_X}%且非冰点日 "
+              f"→ 今日新开仓金额×{DRAWDOWN_BOOST_W} "
+              f"(最终系数={pos_scale['final_scale']}, =0.3×NAV单仓cap)")
+    except Exception as e:
+        # 铁律: boost任何异常绝不炸断主链, 降级回原系数0行为
+        print(f"  [ERROR][boost] 异常降级不加仓(按原系数运行): {e!r}")
+        boost = {'enabled': DRAWDOWN_BOOST_ENABLED, 'active': False,
+                 'factor': 1.0, 'drawdown_pct': None, 'nav_peak': None,
+                 'skip_reason': f'exception: {e!r}'}
+    pos_scale['boost'] = boost
+    return pos_scale
+
+
+# =============================================================================
+# 卖出参数提取（与回测策略声明严格一致，禁止默认值兜底）
+# =============================================================================
+
+def get_sell_params(strategy) -> dict:
+    """从策略类显式读取卖出参数，保证实盘执行与回测同一套规则。
+
+    - timed模式(B2-A, exit_mode='d2h1_close'): 买入次日H1收盘(10:30)定时了结,
+      无盘中TP/SL(策略声明的极宽TP/SL仅为框架读取要求, 不落地) —— Task#36
+    - trailing模式(S4): trailing_stop_pp + stop_loss_pp, 无固定TP
+    - fixed模式(S1/S2/S3): take_profit_pct + stop_loss_pct。FB-A v2的
+      exit_mode='tpsl_d6'(TP/SL挂单监控D2..D6+D6收盘兜底)即fixed+expire_date
+      语义, 直接放行fixed分支 —— Task#68
+    读取不到明确参数/无法识别的exit_mode时抛异常，绝不静默使用默认值(历史事故根源)。
+    """
+    exit_mode = getattr(strategy, 'exit_mode', None)
+    if exit_mode not in (None, 'hold1_close', 'tpsl_d6'):
+        if exit_mode == 'd2h1_close':
+            return {
+                'sell_mode': 'timed',
+                'sell_time': '10:30',   # D2 H1收盘定时点, 与回测d2h1_close一致
+                'trailing_pp': None,
+                'sl_pct': None,
+                'tp_pct': None,
+            }
+        raise ValueError(
+            f"策略 {strategy.name} exit_mode={exit_mode!r} 尚无实盘执行支持"
+            f"(目前仅d2h1_close→timed), fail-fast拒单")
+    if (hasattr(strategy, 'trailing_stop_pp')
+            and getattr(strategy, 'sell_mode', 'trailing') == 'trailing'):
+        return {
+            'sell_mode': 'trailing',
+            'trailing_pp': float(strategy.trailing_stop_pp),
+            'sl_pct': -float(strategy.stop_loss_pp) / 100.0,
+            'tp_pct': None,
+            # 2026-07-31批准(APPROVAL_G2_MINUTE): G2确认三参随卖出参数落盘
+            # (缺省全关零侵入; 现仅大阳低吸声明confirm_bars=2)
+            'confirm_bars': int(getattr(strategy, 'confirm_bars', 0) or 0),
+            'confirm_before': getattr(strategy, 'confirm_before', '') or '',
+            'confirm_scope': (getattr(strategy, 'confirm_scope', 'trailing')
+                              or 'trailing'),
+        }
+    if hasattr(strategy, 'take_profit_pct') and hasattr(strategy, 'stop_loss_pct'):
+        return {
+            'sell_mode': 'fixed',
+            'trailing_pp': None,
+            'sl_pct': float(strategy.stop_loss_pct),
+            'tp_pct': float(strategy.take_profit_pct),
+        }
+    raise ValueError(
+        f"策略 {strategy.name} 未声明卖出参数"
+        f"(trailing_stop_pp/stop_loss_pp 或 take_profit_pct/stop_loss_pct)")
+
+
+# =============================================================================
+# 核心决策逻辑
+# =============================================================================
+
+def check_quote_anomaly(quotes: dict, candidates_data: dict,
+                        flat_tol_pct: float = 0.3,
+                        min_candidates: int = 5,
+                        flat_ratio_threshold: float = 0.90):
+    """9:25行情源合理性校验(Task#38防御熔断)。
+
+    背景(DIAG_20260724): 备用源返回昨日K线 → 全部候选open_rate≈0% →
+    静默误过滤21只。此类故障有明确统计指纹: 正常交易日候选(隔夜情绪股)
+    开盘涨幅几乎不可能集体≈0。
+
+    规则: 有行情的候选≥{min_candidates}只 且 |open_rate|<{flat_tol_pct}%
+    的占比>{flat_ratio_threshold:.0%} → 判定行情源异常。
+    候选<{min_candidates}只不启用(样本太小, 避免误杀真实集体平开)。
+
+    Returns: None=正常; dict=异常统计(供告警与decision json记录)。
+    """
+    signal_closes = {}
+    for s in candidates_data.values():
+        for c in s.get('candidates', []):
+            if c.get('signal_close'):
+                signal_closes.setdefault(c['code'], c['signal_close'])
+
+    rates = []
+    for code, sclose in signal_closes.items():
+        q = quotes.get(code)
+        if not q or sclose <= 0:
+            continue
+        rates.append((code, (q['open'] / sclose - 1) * 100))
+
+    if len(rates) < min_candidates:
+        return None
+
+    flat = [(c, r) for c, r in rates if abs(r) < flat_tol_pct]
+    ratio = len(flat) / len(rates)
+    if ratio > flat_ratio_threshold:
+        return {
+            'checked': len(rates),
+            'flat_count': len(flat),
+            'flat_ratio_pct': round(ratio * 100, 1),
+            'flat_tol_pct': flat_tol_pct,
+            'sample': [f"{c}:{r:+.2f}%" for c, r in rates[:10]],
+        }
+    return None
+
+
+def morning_evaluate(trade_date: str, quotes: dict, candidates_data: dict) -> dict:
+    """对所有策略slots执行买入决策。
+
+    Args:
+        trade_date: 当日交易日
+        quotes: {code: {'open': float, 'preclose': float}} 实时/测试行情
+                (preclose=交易所口径昨收, 供除权除息拦截)
+        candidates_data: 晚间生成的候选股JSON中的strategies字段
+
+    Returns:
+        {slot_id: {strategy_name, recommendation, meet_condition, ...}}
+    """
+    # 创建带实时开盘价的data_feed
+    open_prices = {c: q['open'] for c, q in quotes.items()}
+    data_feed = RealtimeDataFeed(DATA_DB)
+    data_feed.set_live_mode(trade_date, open_prices)
+
+    # 用户排除名单(双保险第二层, 异常降级空集合)
+    user_excluded = load_user_excluded(trade_date)
+
+    # [Task#253] 公告预警名单(命中候选跳过买入, 保留展示; 异常降级空名单)
+    ann_alerts = load_ann_alerts(trade_date)
+
+    # [Task#297] 预约披露日历(第三层过滤: 持有窗含预约披露日跳过买入,
+    # 保留展示; 日历缺失/过期fail-open降级空不拦截)
+    earnings_map = load_earnings_block_map()
+
+    decisions = {}
+
+    for slot_id, slot_data in candidates_data.items():
+        strategy_name = slot_data.get('strategy_name', '')
+        strategy_class = slot_data.get('strategy_class', '')
+        candidates = slot_data.get('candidates', [])
+
+        if not candidates:
+            decisions[slot_id] = {
+                'strategy': strategy_name,
+                'total_candidates': 0,
+                'with_open_price': 0,
+                'meet_condition': [],
+                'recommendations': [],
+            }
+            continue
+
+        # 加载策略实例
+        cfg = get_strategy_config_by_slot(slot_id)
+        if not cfg:
+            decisions[slot_id] = {
+                'strategy': strategy_name,
+                'total_candidates': len(candidates),
+                'with_open_price': 0,
+                'meet_condition': [],
+                'recommendations': [],
+                'error': f'slot {slot_id} 未配置',
+            }
+            continue
+
+        try:
+            strategy = load_strategy(cfg)
+        except Exception as e:
+            decisions[slot_id] = {
+                'strategy': strategy_name,
+                'total_candidates': len(candidates),
+                'error': str(e),
+                'meet_condition': [],
+                'recommendations': [],
+            }
+            continue
+
+        # 使用策略的get_candidates在live模式下重新筛选(精确过滤)
+        try:
+            filtered_codes = strategy.get_candidates(trade_date, data_feed)
+        except Exception as e:
+            print(f"  [WARN] {strategy.name}.get_candidates(live) 异常: {e}")
+            filtered_codes = []
+
+        # 收集满足条件的候选
+        candidate_codes_set = set(c['code'] for c in candidates)
+        meet_condition = []
+        with_open_price = 0
+
+        # 卖出参数（与回测策略声明一致，禁止默认值）
+        try:
+            sell_params = get_sell_params(strategy)
+        except ValueError as e:
+            decisions[slot_id] = {
+                'strategy': strategy_name,
+                'total_candidates': len(candidates),
+                'error': str(e),
+                'meet_condition': [],
+                'recommendations': [],
+            }
+            continue
+
+        for c in candidates:
+            code = c['code']
+            cname = c.get('name', '')
+            if code in user_excluded:
+                print(f"  [逐只] {slot_id} {code} {cname}"
+                      f"|拒: [用户排除] 命中当日排除名单(双保险第二层)")
+                continue
+            if code in ann_alerts:
+                print(f"  [公告预警排除] {code}《{ann_alerts[code]}》")
+                print(f"  [逐只] {slot_id} {code} {cname}"
+                      f"|拒: [公告预警] 命中预警名单, 暂不参与买入(保留展示)")
+                continue
+            # [Task#297] 第三层过滤: 预约披露日落在持有窗内→跳过买入
+            # (保留展示; 窗口=D0+策略max_hold_days+1天缓冲, 决策时实算不依赖
+            # 晚间标注字段, 与user_excluded双层防护同哲学)
+            if earnings_map:
+                from realtime.earnings_calendar import check_earnings_window
+                _eb_hit = check_earnings_window(
+                    code, trade_date,
+                    getattr(strategy, 'max_hold_hours', 8), earnings_map)
+                if _eb_hit:
+                    print(f"  [财报拦截] {code} 预约{_eb_hit[5:]}在持有窗内")
+                    print(f"  [逐只] {slot_id} {code} {cname}"
+                          f"|拒: [财报期] 预约披露{_eb_hit}落在持有窗内, "
+                          f"不参与买入避免碰雷(保留展示)")
+                    continue
+            if code not in quotes:
+                print(f"  [逐只] {slot_id} {code} {cname}|open_rate=NA"
+                      f"|拒: 未获取到开盘价")
+                continue
+            with_open_price += 1
+
+            q = quotes[code]
+            open_p = q['open']
+            quote_preclose = q.get('preclose', 0)
+            signal_close = c.get('signal_close', 0)
+            preclose = c.get('signal_close', open_p)  # trade_date preclose ≈ signal_date close
+            open_rate = (open_p / preclose - 1) * 100 if preclose > 0 else 0
+
+            if code not in filtered_codes:
+                print(f"  [逐只] {slot_id} {code} {cname}"
+                      f"|open_rate={open_rate:+.2f}%"
+                      f"|拒: live复筛未通过(开盘窗口/策略过滤)")
+                continue
+
+            # 入场守卫(Task#45统一): 除权除息拦截+涨停拦截走
+            # execution_core.evaluate_open_entry —— 与回测引擎买入循环
+            # 同一份入场评估函数(判定顺序/数学口径与历史实盘完全一致:
+            # 除权比对=行情昨收vs信号日close, 涨停基准=preclose即信号日close)
+            entry_dec, entry_reject = evaluate_open_entry(
+                code=code, strategy=strategy.name, slot_id=slot_id,
+                date=trade_date, open_price=open_p,
+                exchange_preclose=quote_preclose, prev_close=signal_close,
+                signal_ref_close=signal_close,
+                is_st=trading_rules.is_st_name(c.get('name', '')),
+                limit_basis=preclose)
+            if entry_reject == 'ex_dividend':
+                print(f"  [逐只] {slot_id} {code} {cname}"
+                      f"|open_rate={open_rate:+.2f}%"
+                      f"|拒: 除权除息日,开盘价语义失真"
+                      f"(行情昨收{quote_preclose}≠信号日close{signal_close})")
+                continue
+            if entry_reject == 'limit_up_open':
+                print(f"  [逐只] {slot_id} {code} {cname}"
+                      f"|open_rate={open_rate:+.2f}%"
+                      f"|拒: 开盘{open_p:.2f}已涨停,买单排队买不到")
+                continue
+
+            print(f"  [逐只] {slot_id} {code} {cname}"
+                  f"|open_rate={open_rate:+.2f}%|命中")
+
+            sl_price = (round(open_p * (1 + sell_params['sl_pct']), 2)
+                        if sell_params['sl_pct'] is not None else None)
+            tp_price = (round(open_p * (1 + sell_params['tp_pct']), 2)
+                        if sell_params['tp_pct'] is not None else None)
+
+            meet_condition.append({
+                'code': code,
+                'name': c.get('name', ''),
+                'open': round(open_p, 2),
+                'signal_close': signal_close,
+                'open_rate_pct': round(open_rate, 2),
+                'turn': c.get('turn', 0),
+                'buy_price': round(open_p, 2),
+                'tp_price': tp_price,
+                'sl_price': sl_price,
+                'sell_mode': sell_params['sell_mode'],
+                'trailing_pp': sell_params['trailing_pp'],
+                'sell_time': sell_params.get('sell_time'),  # timed用
+                # G2确认三参透传(仅trailing+声明策略非零; 其余.get缺省全关)
+                'confirm_bars': sell_params.get('confirm_bars', 0),
+                'confirm_before': sell_params.get('confirm_before', ''),
+                'confirm_scope': sell_params.get('confirm_scope', 'trailing'),
+            })
+
+        # 排序取top (保持原策略排序 - filtered_codes已排好序)
+        code_rank = {c: i for i, c in enumerate(filtered_codes)}
+        meet_condition.sort(key=lambda x: code_rank.get(x['code'], 9999))
+        recommendations = meet_condition[:MAX_SLOT_PER_STRATEGY]
+
+        decisions[slot_id] = {
+            'strategy': strategy_name,
+            'total_candidates': len(candidates),
+            'with_open_price': with_open_price,
+            'meet_condition': meet_condition,
+            'recommendations': recommendations,
+        }
+
+        # [Task#285] 策略冻结分支(用户批准A案2026-08-11, t283 DECISION_PACK
+        # §2.1): 冻结策略的recommendations转入frozen_recommendations并清空
+        # —— allocate_idle_slots只处理有recommendations的通道, 清空后S3自然
+        # 退出槽位竞争, 空槽由V-C机制自动分给其余策略(与A案回测语义一致,
+        # 零改allocate_idle_slots)。铁律: 任何异常降级为不冻结, 不炸主链。
+        try:
+            if strategy_name in STRATEGY_FROZEN:
+                res = decisions[slot_id]
+                # 字段变更先行(日志异常不得留下"frozen但未清recommendations"态)
+                res['frozen'] = True
+                res['frozen_recommendations'] = recommendations
+                res['recommendations'] = []
+                for _fr in recommendations:
+                    print(f"  [S3冻结] {_fr['code']} {_fr.get('name', '')} "
+                          f"满足买入条件但策略已冻结待替换, 转假想跟踪")
+                print(f"  [S3冻结] {strategy_name} 候选{len(candidates)}只 "
+                      f"仅假想跟踪不买入"
+                      f"(满足{len(meet_condition)}只/假想{len(recommendations)}只, "
+                      f"槽位交V-C动态竞争)")
+        except Exception as e:
+            print(f"  [ERROR][S3冻结] 冻结分支异常降级为不冻结: {e!r}")
+
+    data_feed.close()
+    return decisions
+
+
+# =============================================================================
+# V-C匿名动态槽位分配 (用户裁决2026-07-31, VC_DYNAMIC_SLOTS开关控制)
+# =============================================================================
+
+def allocate_idle_slots(decisions: dict, scale: float = 1.0,
+                        pos_data: dict = None) -> dict:
+    """V-C槽位分配: 策略→槽位固定映射改为动态分配。
+
+    用户裁决三原则:
+    ①5槽与策略解绑: 槽=纯资金位(P1..P5), 空槽不标策略;
+    ②谁有信号谁占空闲槽(复用买入=占真实空闲槽, 槽上标策略名);
+    ③无空闲槽时杜绝先买后卖(复用信号当日放弃, skipped_no_idle_slot留痕)。
+
+    口径:
+    - 空闲槽数 = 5 - 当前holding数(任何待卖持仓都占槽, S5复用场景自动
+      视同"无自己槽", 须有其他空闲槽才买) —— 与回测引擎
+      backtest/portfolio.py 的 _empty_slot_id()/has_empty_slot() 同语义;
+    - 优先级: 正当新信号(策略无在持仓)优先, 复用信号(策略自身仍有
+      待卖持仓)排后; 组内按策略通道名字序, 确定性可重放;
+    - 现金预算: 逐笔预留 total_nav/5×scale(不计当日未来回款),
+      预留超现金 → skipped_insufficient_cash留痕+告警(正常不应触发,
+      触发=账本异常的tripwire); confirm_buy处另有同语义硬断言兑底。
+
+    直接原地修改decisions(同L2白名单拦截模式): 获配通道写
+    res['vc_assigned_slot']='P×'; 被跳过通道recommendations清空并转入
+    skipped_*字段。返回分配审计块(写入decision json 'vc_allocation')。
+
+    pos_data: 测试注入用(默认load_positions读生产持仓)。
+    """
+    if pos_data is None:
+        pos_data = load_positions()
+    account = pos_data.get('account', {})
+    cash = account.get('cash', 0)
+    holdings = [p for p in pos_data.get('positions', [])
+                if p.get('status') == 'holding']
+    n_fund_slots = 5
+    idle_count = n_fund_slots - len(holdings)
+
+    # 空闲资金位编号: 遗留Sk标签持仓视同占用Pk(平滑迁移, 卖出即释放),
+    # 新买入一律用P编号
+    used_nums = set()
+    for p in holdings:
+        m = re.match(r'^[SP](\d+)$', str(p.get('slot_id') or ''))
+        if m:
+            used_nums.add(int(m.group(1)))
+    free_ids = [f'P{n}' for n in range(1, n_fund_slots + 1)
+                if n not in used_nums]
+    held_strats = set(p.get('strategy') for p in holdings)
+
+    # 每仓目标金额(引擎口径 total_nav/5×scale, 无min(cash)钳制)
+    holding_value = sum(p.get('buy_amount') or 0 for p in holdings)
+    per_slot = (cash + holding_value) / n_fund_slots * scale
+
+    channels = sorted(k for k in decisions
+                      if decisions[k].get('recommendations'))
+    order = ([c for c in channels
+              if decisions[c].get('strategy') not in held_strats]
+             + [c for c in channels
+                if decisions[c].get('strategy') in held_strats])
+
+    allocation = {
+        'mode': 'vc_dynamic',
+        'idle_slots': idle_count,
+        'holdings': len(holdings),
+        'cash': round(cash, 2),
+        'per_slot_target': round(per_slot, 2),
+        'assigned': {},
+        'skipped': {},
+    }
+    print(f"\n  [V-C槽位分配] 持仓{len(holdings)}笔 | 空闲槽{idle_count}个"
+          f"({','.join(free_ids) or '无'}) | 现金¥{cash:,.0f} | "
+          f"每仓目标¥{per_slot:,.0f}")
+
+    reserved = 0.0
+    n_assigned = 0
+    for ch in order:
+        res = decisions[ch]
+        strat = res.get('strategy', '?')
+        rec0 = res['recommendations'][0]
+        is_reuse = strat in held_strats
+        tag = '复用' if is_reuse else '新信号'
+        if n_assigned >= idle_count or not free_ids:
+            # 用户裁决③: 无空闲槽=当日放弃, 杜绝先买后卖
+            res['skipped_no_idle_slot'] = res['recommendations']
+            res['recommendations'] = []
+            allocation['skipped'][ch] = 'no_idle_slot'
+            print(f"  🛑 [V-C] {ch} {strategy_display_name(strat)}({tag}) "
+                  f"{rec0['code']} {rec0['name']} — 无空闲槽, 当日放弃"
+                  f"(skipped_no_idle_slot)")
+            continue
+        if reserved + per_slot > cash + 0.01:
+            # tripwire: 有空闲槽但备付现金不够 = 账本/槽位语义异常
+            res['skipped_insufficient_cash'] = res['recommendations']
+            res['recommendations'] = []
+            allocation['skipped'][ch] = 'insufficient_cash'
+            msg = (f"[V-C] {ch} {strategy_display_name(strat)} 有空闲槽但现金"
+                   f"不足(已预留¥{reserved:,.0f}+每仓¥{per_slot:,.0f}"
+                   f">现金¥{cash:,.0f}), 拒单留痕")
+            print(f"  🚨 {msg}")
+            try:
+                from realtime.position_tracker import SCHEDULER_ALERT_LOG
+                with open(SCHEDULER_ALERT_LOG, 'a', encoding='utf-8') as f:
+                    f.write(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] "
+                            f"🚨 {msg}(空闲槽应有备付现金, 需人工对账)\n")
+            except OSError:
+                pass
+            continue
+        sid = free_ids.pop(0)
+        res['vc_assigned_slot'] = sid
+        allocation['assigned'][ch] = {
+            'fund_slot': sid,
+            'strategy': strat,
+            'reuse': is_reuse,
+            'code': rec0['code'],
+        }
+        reserved += per_slot
+        n_assigned += 1
+        print(f"  ✅ [V-C] {ch} {strategy_display_name(strat)}({tag}) "
+              f"{rec0['code']} {rec0['name']} → 资金位{sid}")
+    return allocation
+
+
+# =============================================================================
+# 输出格式化
+# =============================================================================
+
+def print_decision(trade_date: str, signal_date: str, decisions: dict,
+                   scale: float = 1.0):
+    """格式化输出交易建议。scale=冰点overlay买入系数(Task#68)。"""
+    n_strategies = len(decisions)
+
+    # 获取当前账户状态和动态再平衡金额
+    pos_data = load_positions()
+    account = pos_data.get('account', {})
+    buy_amount_per_slot = get_buy_amount(pos_data, scale=scale)
+
+    print(f"\n{'=' * 60}")
+    print(f"  {trade_date} {n_strategies}策略交易建议 (信号日: {signal_date})")
+    print(f"  动态再平衡: 每slot买入 ¥{buy_amount_per_slot:,.0f} "
+          f"(总净值 ¥{account.get('total_nav', TOTAL_CAPITAL):,.0f} / 5"
+          f"{f' × 仓位系数{scale}(冰点×回撤)' if scale != 1.0 else ''})")
+    print(f"{'=' * 60}")
+
+    for slot_id in sorted(decisions.keys()):
+        res = decisions[slot_id]
+        strat_name = res.get('strategy', '?')
+        # 决策日志中文主导(用户指令2026-07-30), 技术名保留括号内供运维grep
+        print(f"\n[{slot_id} {strategy_display_name(strat_name)}({strat_name})]")
+        print(f"  候选: {res['total_candidates']}只 | "
+              f"获取开盘价: {res['with_open_price']}只 | "
+              f"满足条件: {len(res['meet_condition'])}只")
+
+        if res.get('error'):
+            print(f"  [ERROR] {res['error']}")
+            continue
+
+        recs = res.get('recommendations', [])
+        if recs:
+            for i, rec in enumerate(recs, 1):
+                print(f"  ★ 建议{i}: {rec['code']} {rec['name']} "
+                      f"@{rec['buy_price']:.2f} (开盘{rec['open_rate_pct']:+.2f}%) "
+                      f"turn={rec['turn']}%")
+                if rec.get('sell_mode') == 'timed':
+                    print(f"       次日{rec.get('sell_time') or '10:30'}"
+                          f"定时卖出(无盘中止盈止损)")
+                elif rec.get('sell_mode') == 'trailing':
+                    print(f"       移动止盈=高点回落{rec.get('trailing_pp', 2.0)}pp"
+                          f" | 硬止损={rec['sl_price']:.2f}")
+                else:
+                    tp_str = (f"{rec['tp_price']:.2f}"
+                              if rec.get('tp_price') else '无')
+                    print(f"       止盈={tp_str} | 止损={rec['sl_price']:.2f}")
+        else:
+            print(f"  ★ 建议: 无 (无满足条件标的)")
+
+        # 备选
+        if len(res['meet_condition']) > MAX_SLOT_PER_STRATEGY:
+            print(f"  备选:")
+            for c in res['meet_condition'][MAX_SLOT_PER_STRATEGY:4]:
+                print(f"    - {c['code']} {c['name']} @{c['open']:.2f} "
+                      f"({c['open_rate_pct']:+.2f}%) turn={c['turn']}%")
+
+    print(f"\n{'=' * 60}")
+
+
+# =============================================================================
+# Pending Buy 生成
+# =============================================================================
+
+def _get_max_hold_hours(strategy_name: str) -> int:
+    """通过策略名获取max_hold_hours参数。"""
+    for cfg in ACTIVE_STRATEGIES:
+        if not cfg['enabled']:
+            continue
+        try:
+            mod = importlib.import_module(cfg['module'])
+            cls = getattr(mod, cfg['class'])
+            instance = cls()
+            if instance.name == strategy_name:
+                return getattr(instance, 'max_hold_hours', 8)
+        except Exception:
+            continue
+    return 8  # 默认值
+
+
+def _calc_expire_date(buy_date_str: str, max_hold_hours: int, conn) -> str:
+    """计算到期日 = 买入日 + ceil(max_hold_hours/4)个交易日。"""
+    days_needed = math.ceil(max_hold_hours / 4)
+    # 优先用数据库交易日历
+    cursor = conn.execute(
+        "SELECT DISTINCT date FROM stock_kline WHERE date > ? ORDER BY date LIMIT ?",
+        (buy_date_str, days_needed)
+    )
+    trading_dates = [r[0] for r in cursor.fetchall()]
+    if len(trading_dates) >= days_needed:
+        return trading_dates[days_needed - 1]
+    # fallback: 简单加自然日（跳过周末）
+    buy_date = datetime.strptime(buy_date_str, '%Y-%m-%d')
+    current = buy_date
+    count = 0
+    while count < days_needed:
+        current += timedelta(days=1)
+        if current.weekday() < 5:
+            count += 1
+    return current.strftime('%Y-%m-%d')
+
+
+def generate_pending_buys(trade_date: str, decisions: dict, conn=None,
+                          scale: float = 1.0, weak_info: dict = None):
+    """生成待确认买入记录(供position_tracker使用)。
+
+    scale(Task#68): 冰点overlay买入系数, 逐笔写入pending记录,
+    confirm_buy按此系数分配金额(审计链路: decision json → pending → 持仓)。
+    weak_info(Task#205 expam35): {'is_weak','limitup_cnt'} 弱市日判定
+    (D-1非ST涨停家数<ICE, 与冰点同源同一次计算)。弱市日买入的S2
+    (巨振反转amplitude_reversal)仓 → pending落weak_buy=true+limitup_cnt_d1,
+    到期日改早盘AM离场(evaluate_position gap判TP/SL)。旧仓无字段=false。
+    """
+    pending = []
+    buy_date = trade_date
+    # 如果没传conn，自行连接
+    own_conn = False
+    if conn is None:
+        conn = sqlite3.connect(DATA_DB)
+        own_conn = True
+
+    for slot_id, res in sorted(decisions.items()):
+        recs = res.get('recommendations', [])
+        if not recs:
+            continue
+        rec = recs[0]  # 每slot取top1执行
+
+        # 根据策略获取max_hold_hours计算expire_date
+        strategy_name = res['strategy']
+        max_hold_hours = _get_max_hold_hours(strategy_name)
+        sell_at = None
+        if rec.get('sell_mode') == 'timed':
+            # timed(Task#36): 定时点=买入次日(下一交易日)+sell_time,
+            # expire_date=同日(cron旧到期语义兜底也在同一天生效)
+            next_d = _calc_expire_date(buy_date, 4, conn)  # ceil(4/4)=1 → 次交易日
+            sell_at = {'date': next_d,
+                       'time': rec.get('sell_time') or '10:30'}
+            expire_date = next_d
+        else:
+            expire_date = _calc_expire_date(buy_date, max_hold_hours, conn)
+
+        pending_rec = {
+            'code': rec['code'],
+            'name': rec['name'],
+            'strategy': res['strategy'],
+            # V-C开启时slot_id=动态资金位编号(P×, allocate_idle_slots分配);
+            # 关闭时无vc_assigned_slot字段, 仍为策略通道号(S×, 现行行为)
+            'slot_id': res.get('vc_assigned_slot') or slot_id,
+            'buy_date': buy_date,
+            'buy_price': rec['buy_price'],
+            'tp_price': rec.get('tp_price'),
+            'sl_price': rec['sl_price'],
+            'sell_mode': rec.get('sell_mode', 'fixed'),
+            'trailing_pp': rec.get('trailing_pp'),
+            'sell_at': sell_at,
+            'expire_date': expire_date,
+            'position_scale': scale,   # Task#68 冰点overlay系数透传confirm_buy
+            # G2确认三参: decision → pending → confirm_buy持仓落盘(A6→A7)
+            'confirm_bars': rec.get('confirm_bars', 0),
+            'confirm_before': rec.get('confirm_before', ''),
+            'confirm_scope': rec.get('confirm_scope', 'trailing'),
+        }
+        # weak_buy标记(Task#205 expam35): 弱市日买入的S2巨振反转仓打标;
+        # 铁律兜底: 任何异常→不打标(保持旧到期语义)+ERROR日志
+        try:
+            if (weak_info and weak_info.get('is_weak')
+                    and res['strategy'] == 'amplitude_reversal'):
+                pending_rec['weak_buy'] = True
+                pending_rec['limitup_cnt_d1'] = weak_info.get('limitup_cnt')
+                print(f"  [weak_buy] {rec['code']} {rec['name']} 弱市日买入"
+                      f"(D-1涨停{weak_info.get('limitup_cnt')}家<"
+                      f"{POSITION_SCALE_ICE}) → 打标weak_buy, 到期日早盘AM离场")
+        except Exception as e:
+            print(f"  [ERROR][weak_buy] 打标异常降级不打标(旧到期语义): {e!r}")
+        pending.append(pending_rec)
+
+    if own_conn:
+        conn.close()
+
+    if pending:
+        pending_file = os.path.join(OUTPUT_DIR, 'pending_buys.json')
+        tmp_path = pending_file + '.tmp'
+        with open(tmp_path, 'w', encoding='utf-8') as f:
+            json.dump(pending, f, ensure_ascii=False, indent=2)
+        os.replace(tmp_path, pending_file)
+        print(f"\n[INFO] 已生成 {len(pending)} 笔待确认买入 → {pending_file}")
+        for p in pending:
+            if p.get('sell_mode') == 'timed':
+                sa = p.get('sell_at') or {}
+                sell_desc = (f"定时卖出 {sa.get('date','?')} "
+                             f"{sa.get('time','?')}(无盘中TP/SL)")
+            elif p.get('sell_mode') == 'trailing':
+                sell_desc = (f"移动止盈(回落{p.get('trailing_pp', 2.0)}pp) "
+                             f"SL={p['sl_price']:.2f}")
+            else:
+                tp_str = f"{p['tp_price']:.2f}" if p.get('tp_price') else '无'
+                sell_desc = f"TP={tp_str} SL={p['sl_price']:.2f}"
+            print(f"  [{p['slot_id']}:{p['strategy']}] {p['code']} {p['name']} "
+                  f"@{p['buy_price']:.2f} {sell_desc}")
+
+
+# =============================================================================
+# Main
+# =============================================================================
+
+def _write_decision_json(out_file: str, decision: dict):
+    """decision json原子写(tmp+rename, 与positions.json同纪律)。"""
+    tmp_path = out_file + '.tmp'
+    with open(tmp_path, 'w', encoding='utf-8') as f:
+        json.dump(decision, f, ensure_ascii=False, indent=2)
+    os.replace(tmp_path, out_file)
+
+
+def main():
+    parser = argparse.ArgumentParser(description='早盘决策(策略无关框架)')
+    parser.add_argument('--test-date', type=str, default=None,
+                        help='测试模式:从DB读取历史开盘价')
+    parser.add_argument('--confirm', action='store_true', default=False,
+                        help='测试模式下仍执行confirm_buy(用于漏跑补录)')
+    args = parser.parse_args()
+
+    test_date = args.test_date
+    os.makedirs(LOG_DIR, exist_ok=True)
+    os.makedirs(OUTPUT_DIR, exist_ok=True)
+
+    conn = sqlite3.connect(DATA_DB)
+
+    # 确定交易日
+    if test_date:
+        trade_date = test_date
+        print(f"[morning_decision] 测试模式, 交易日: {trade_date}")
+    else:
+        trade_date = datetime.now().strftime('%Y-%m-%d')
+        print(f"[morning_decision] 实盘模式, 交易日: {trade_date}")
+
+    # 查找候选股文件
+    cand_file = os.path.join(OUTPUT_DIR, f'candidates_{trade_date.replace("-", "")}.json')
+    if not os.path.exists(cand_file):
+        print(f"[ERROR] 候选股文件不存在: {cand_file}")
+        print(f"  请先运行 generate_candidates.py 生成候选股")
+        conn.close()
+        return 1
+
+    # 加载候选股
+    with open(cand_file, 'r', encoding='utf-8') as f:
+        candidates_json = json.load(f)
+
+    signal_date = candidates_json.get('signal_date', '?')
+    strategies_data = candidates_json.get('strategies', {})
+
+    if not strategies_data:
+        print("[ERROR] 候选股文件中无strategies数据(可能是旧版格式)")
+        conn.close()
+        return 1
+
+    # 统计候选
+    total_cands = sum(len(s.get('candidates', [])) for s in strategies_data.values())
+    print(f"  信号日: {signal_date} | 总候选: {total_cands}只 | "
+          f"策略slots: {len(strategies_data)}个")
+
+    # 收集所有需要开盘价的代码
+    all_codes = list(set(
+        c['code']
+        for s in strategies_data.values()
+        for c in s.get('candidates', [])
+    ))
+
+    # 获取开盘价+昨收 ({code: {'open':..., 'preclose':...}})
+    if test_date:
+        print(f"  使用DB中 {trade_date} 的开盘价...")
+        quotes = fetch_test_open_prices(conn, all_codes, trade_date)
+    else:
+        print(f"  获取实时开盘价...")
+        quotes = fetch_realtime_open_prices(all_codes)
+
+    print(f"  获取到 {len(quotes)}/{len(all_codes)} 只开盘价")
+
+    # 行情源合理性熔断(Task#38): 候选开盘涨幅集体≈0% → 行情源异常,
+    # 拒绝生成决策(宁可人工介入, 不可静默错过滤; DIAG_20260724事故防线)
+    anomaly = check_quote_anomaly(quotes, strategies_data)
+    if anomaly:
+        alert_msg = (
+            f"🚨 [morning_decision] 行情源异常熔断 {trade_date}\n"
+            f"  {anomaly['checked']}只候选中{anomaly['flat_count']}只"
+            f"|open_rate|<{anomaly['flat_tol_pct']}% "
+            f"(占比{anomaly['flat_ratio_pct']}%>90%), "
+            f"疑似行情源返回昨日/静态数据(参DIAG_20260724)。\n"
+            f"  样本: {', '.join(anomaly['sample'][:5])}\n"
+            f"  今日已拒绝生成买入决策。人工复核路径: 确认行情源恢复后\n"
+            f"  python3 realtime/morning_decision.py "
+            f"--test-date {trade_date} --confirm 补录(需当日日K已入库)。")
+        print("\n" + "=" * 60)
+        print(alert_msg)
+        print("=" * 60)
+        # 企微通知(未配置时send_text自动降级为日志)
+        try:
+            from realtime.notify import send_text
+            send_text(alert_msg)
+        except Exception as e:
+            print(f"[WARN] 熔断告警通知发送失败(已有日志兜底): {e}")
+        # scheduler_alerts 落一条(与daemon告警同一人工巡检入口)
+        try:
+            from realtime.position_tracker import SCHEDULER_ALERT_LOG
+            _fuse_msg = (f"🚨 morning_decision行情源异常熔断: "
+                         f"{anomaly['flat_count']}/{anomaly['checked']}只候选"
+                         f"open_rate≈0%, 已拒绝生成决策, 需人工复核补录")
+            with open(SCHEDULER_ALERT_LOG, 'a', encoding='utf-8') as f:
+                f.write(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] "
+                        f"{_fuse_msg}\n")
+            # [Task#256 G2] P0熔断条目落文件同时实时推企微(失败静默)
+            from realtime.notify import push_alert
+            push_alert(_fuse_msg)
+        except Exception:   # 告警/推送任何异常均不阻断熔断主流程
+            pass
+        decision = {
+            'trade_date': trade_date,
+            'signal_date': signal_date,
+            'decided_at': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+            'status': 'aborted_quote_anomaly',
+            'quote_anomaly': anomaly,
+            'strategies': {},
+        }
+        out_file = os.path.join(OUTPUT_DIR, f'decision_{trade_date.replace("-", "")}.json')
+        _write_decision_json(out_file, decision)
+        print(f"\n[ABORT] 决策已中止(status=aborted_quote_anomaly): {out_file}")
+        conn.close()
+        return 1
+
+    # 大盘熔断 [Task#68 2026-07-29移除, 用户已批准]: Task#64数据裁决证明
+    # "前日上证跌>1%不开新仓"方向性错误(6年成本-41.6pp年化/Calmar 4.20→3.55,
+    # 熔断日买入笔均+1.20%反而更肥), 替换为下方冰点减仓overlay。
+    # 回滚=取消以下注释并删除compute_position_scale段:
+    # market_filtered = check_market_filter(conn, trade_date)
+    # if market_filtered:
+    #     decision = {
+    #         'trade_date': trade_date,
+    #         'signal_date': signal_date,
+    #         'decided_at': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+    #         'market_filter': '触发-前日大盘跌>阈值,今日不开新仓',
+    #         'strategies': {},
+    #     }
+    #     out_file = os.path.join(OUTPUT_DIR, f'decision_{trade_date.replace("-", "")}.json')
+    #     _write_decision_json(out_file, decision)
+    #     print(f"\n[OK] 决策已保存(大盘过滤): {out_file}")
+    #     conn.close()
+    #     return 0
+
+    # 冰点减仓overlay(Task#68) × 回撤作战手册(Task#73): 单一口径叠乘留痕
+    # 修复日豁免(2026-07-31): quote_fn随模式适配(实盘=腾讯/测试=库内当日开盘)
+    _quote_fn = ((lambda codes: fetch_test_open_prices(conn, codes, trade_date))
+                 if test_date else fetch_realtime_open_prices)
+    pos_scale = compute_final_scale(conn, trade_date, quote_fn=_quote_fn)
+
+    # 回撤加仓boost(Task#205): 非冰点日且盘后回撤>=15% → final_scale×1.5;
+    # 冰点ice优先boost让位; 状态缺失/异常安全降级不加仓(函数内兜底)
+    pos_scale = apply_drawdown_boost(pos_scale)
+
+    # 弱市日判定(Task#205 expam35): 与冰点同源复用同一次limitup_cnt计算;
+    # 不可得(降级日)→按非弱市处理(不打标, 保持旧到期语义)
+    _cnt = pos_scale.get('limitup_cnt')
+    weak_info = {'is_weak': (_cnt is not None and _cnt < POSITION_SCALE_ICE),
+                 'limitup_cnt': _cnt}
+    if weak_info['is_weak']:
+        print(f"  [weak_buy] 今日为弱市日(D-1涨停{_cnt}家<"
+              f"{POSITION_SCALE_ICE}): 今日买入的S2巨振反转仓将打标weak_buy")
+    pos_scale['weak_day'] = weak_info['is_weak']   # decision json留痕
+
+    # L3熔断(Task#73): 回撤≥30%停止一切新开仓, 决策json显著标注;
+    # 解除需人工ack: python3 tools/drawdown_guard.py ack
+    if pos_scale['halt']:
+        banner = (f"🚨 [回撤熔断L3] {trade_date} 停止一切新开仓 "
+                  f"(回撤作战手册, 需人工ack解除: "
+                  f"python3 tools/drawdown_guard.py ack)")
+        print("\n" + "=" * 60 + f"\n{banner}\n" + "=" * 60)
+        decision = {
+            'trade_date': trade_date,
+            'signal_date': signal_date,
+            'decided_at': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+            'framework_version': '2.0',
+            'status': 'halted_drawdown_L3',
+            'note': '回撤≥30%熔断中, 停止一切新开仓; 解除: '
+                    'python3 tools/drawdown_guard.py ack',
+            'position_scale': pos_scale,
+            'strategies': {},
+        }
+        out_file = os.path.join(
+            OUTPUT_DIR, f'decision_{trade_date.replace("-", "")}.json')
+        _write_decision_json(out_file, decision)
+        print(f"[HALT] 决策已中止(status=halted_drawdown_L3): {out_file}")
+        try:
+            from realtime.position_tracker import SCHEDULER_ALERT_LOG
+            with open(SCHEDULER_ALERT_LOG, 'a', encoding='utf-8') as f:
+                f.write(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] "
+                        f"{banner}\n")
+        except OSError:
+            pass
+        conn.close()
+        return 0
+
+    # 执行决策
+    decisions = morning_evaluate(trade_date, quotes, strategies_data)
+
+    # L2白名单拦截(Task#73): whitelist_only时仅白名单策略(创科晚封/大阳低吸)
+    # 可开新仓, 其余槽位跳过并留痕(skipped_by_drawdown_whitelist)
+    if pos_scale.get('whitelist') is not None:
+        _wl = set(pos_scale['whitelist'])
+        for _sid, _res in sorted(decisions.items()):
+            if _res.get('strategy') not in _wl and _res.get('recommendations'):
+                _res['skipped_by_drawdown_whitelist'] = \
+                    _res['recommendations']
+                _res['recommendations'] = []
+                print(f"  🛑 [回撤L2白名单] {_sid} "
+                      f"{strategy_display_name(_res['strategy'])}"
+                      f"({_res['strategy']}) 非白名单, 今日跳过开仓")
+
+    # V-C匿名动态槽位分配(用户裁决2026-07-31): 空闲槽数/现金预算内分配
+    # 资金位P×, 超出部分skipped_no_idle_slot留痕; 开关关闭时零行为变化
+    vc_allocation = None
+    if VC_DYNAMIC_SLOTS:
+        vc_allocation = allocate_idle_slots(decisions,
+                                            scale=pos_scale['final_scale'])
+
+    # 输出
+    print_decision(trade_date, signal_date, decisions,
+                   scale=pos_scale['final_scale'])
+
+    # 保存决策JSON
+    decision_output = {
+        'trade_date': trade_date,
+        'signal_date': signal_date,
+        'decided_at': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+        'framework_version': '2.0',
+        'position_scale': pos_scale,   # Task#68冰点×Task#73回撤 全留痕
+        'vc_allocation': vc_allocation,  # V-C槽位分配审计(关闭时null)
+        'strategies': decisions,
+    }
+    out_file = os.path.join(OUTPUT_DIR, f'decision_{trade_date.replace("-", "")}.json')
+    _write_decision_json(out_file, decision_output)
+    print(f"\n[OK] 决策结果已保存: {out_file}")
+
+    # 生成pending_buy
+    generate_pending_buys(trade_date, decisions, conn,
+                          scale=pos_scale['final_scale'],
+                          weak_info=weak_info)
+
+    if test_date and not args.confirm:
+        # 测试模式: 不确认买入/不通知，避免污染实盘持仓(补录请加--confirm)
+        print("[INFO] 测试模式：跳过confirm_buy与通知(补录用--confirm)")
+        conn.close()
+        return 0
+
+    # 生成后直接确认买入，无需等待position_tracker定时执行（消除35分钟延迟）
+    from realtime.position_tracker import confirm_buy
+    print("[INFO] 直接执行confirm_buy，立即更新持仓...")
+    confirm_buy()
+    print("[INFO] 持仓已更新")
+
+    # 发送企业微信通知
+    try:
+        from realtime.notify import notify_buy, notify_morning_summary
+        from datetime import datetime as _dt
+        now_time = _dt.now().strftime('%H:%M:%S')
+        today_date = _dt.now().strftime('%Y-%m-%d')
+        for slot_id, info in decisions.items():
+            for r in info.get('recommendations', []):
+                # V-C开启时通知展示动态资金位编号(与pending/持仓一致)
+                r['slot_id'] = info.get('vc_assigned_slot') or slot_id
+                r['strategy'] = info.get('strategy', '')
+                # Task#205通知增强: boost加仓/弱市仓标注(异常不影响发送)
+                _note = ''
+                try:
+                    _tags = []
+                    if pos_scale.get('boost', {}).get('active'):
+                        _tags.append('回撤加仓1.5x')
+                    if (weak_info.get('is_weak')
+                            and info.get('strategy') == 'amplitude_reversal'):
+                        _tags.append('弱市仓·到期早盘离场')
+                    _note = '｜'.join(_tags)
+                except Exception as e:
+                    print(f"[ERROR][notify标注] 生成异常降级无标注: {e!r}")
+                notify_buy(
+                    date_str=today_date,
+                    time_str=now_time,
+                    stock_name=r.get('name', ''),
+                    stock_code=r.get('code', ''),
+                    price=r.get('buy_price', 0),
+                    stop_profit_price=r.get('tp_price'),
+                    stop_loss_price=r.get('sl_price'),
+                    note=_note,
+                )
+        notify_morning_summary(decisions)
+    except Exception as e:
+        print(f"[morning_decision] 通知发送失败(非致命): {e}")
+
+    conn.close()
+    return 0
+
+
+if __name__ == '__main__':
+    sys.exit(main())

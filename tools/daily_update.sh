@@ -29,8 +29,9 @@ fi
 
 # 执行K线抓取
 echo "[$(date '+%Y-%m-%d %H:%M:%S')] 开始抓取 ${TODAY} 日K数据..." >> "${LOG_FILE}"
-/usr/bin/python3 -u "${SCRIPT_DIR}/fetch_daily_kline.py" "${TODAY}" >> "${LOG_FILE}" 2>&1
-EXIT_CODE=$?
+# 注: set -e 下必须用 || 捕获, 否则非零退出会直接终止本脚本(历史隐患)
+EXIT_CODE=0
+/usr/bin/python3 -u "${SCRIPT_DIR}/fetch_daily_kline.py" "${TODAY}" >> "${LOG_FILE}" 2>&1 || EXIT_CODE=$?
 
 if [ $EXIT_CODE -eq 0 ]; then
     echo "[$(date '+%Y-%m-%d %H:%M:%S')] K线抓取完成 (exit=$EXIT_CODE)" >> "${LOG_FILE}"
@@ -53,11 +54,26 @@ if [ "$COUNT" -lt 1000 ]; then
     echo "[$(date '+%Y-%m-%d %H:%M:%S')] 警告: 数据量不足1000条，可能存在异常！" >> "${LOG_FILE}"
 fi
 
-# 更新指数K线(上证综指)
+# 更新指数K线(上证综指+深证成指)
+# [Task #295] 推翻Task#10废弃裁定: sz.399001恢复日常更新(2026-05-15~08-10
+# 缺口已经腾讯源回补), 与sh.000001同块更新; 块后腾讯降级源+缺口自检双保险。
 echo "[$(date '+%Y-%m-%d %H:%M:%S')] 开始更新指数K线..." >> "${LOG_FILE}"
 /usr/bin/python3 -u -c "
-import sqlite3, math
+import sqlite3, math, sys
 import baostock as bs
+
+# [Task#259] 统一日预算: 指数查询前申请3次额度(login+query+余量, p0口径);
+# 耗尽则跳过BaoStock查询(下方腾讯fqkline降级源会兜底补行); 模块异常fail-open
+sys.path.insert(0, '/home/AIWealth/tools')
+try:
+    import baostock_budget as _bb
+    if not _bb.acquire(4, 'p0'):
+        print('[Task#259] 统一日预算耗尽, 跳过指数BaoStock查询(腾讯降级源兜底)')
+        sys.exit(0)
+except SystemExit:
+    raise
+except Exception as e:
+    print(f'[Task#259] 预算模块异常(fail-open放行): {e}')
 
 DB_PATH = '/home/AIWealth/data/stocks.db'
 conn = sqlite3.connect(DB_PATH)
@@ -75,22 +91,23 @@ def calc_rate(price, preclose):
 
 lg = bs.login()
 today = '${TODAY}'
-rs = bs.query_history_k_data_plus('sh.000001',
-    'date,code,open,high,low,close,preclose,volume,amount',
-    start_date=today, end_date=today, frequency='d')
-
 count = 0
-while rs.next():
-    row = rs.get_row_data()
-    date, code = row[0], row[1]
-    o, h, l, c, pre = [safe_float(x) for x in row[2:7]]
-    vol, amt = safe_float(row[7]), safe_float(row[8])
-    vals = [date, code, '上证综指', o, h, l, c, pre, vol, amt,
-            calc_rate(o,pre), calc_rate(h,pre), calc_rate(l,pre), calc_rate(c,pre)]
-    vals.extend([None]*40)  # hour1-4 placeholders + red_ratio
-    vals.append(None)
-    conn.execute('INSERT OR REPLACE INTO index_kline VALUES (' + ','.join(['?']*55) + ')', vals)
-    count += 1
+# [Task #295] sh.000001+sz.399001双指数更新(sz.399001恢复维护)
+for idx_code, idx_name in (('sh.000001', '上证综指'), ('sz.399001', '深证成指')):
+    rs = bs.query_history_k_data_plus(idx_code,
+        'date,code,open,high,low,close,preclose,volume,amount',
+        start_date=today, end_date=today, frequency='d')
+    while rs.next():
+        row = rs.get_row_data()
+        date, code = row[0], row[1]
+        o, h, l, c, pre = [safe_float(x) for x in row[2:7]]
+        vol, amt = safe_float(row[7]), safe_float(row[8])
+        vals = [date, code, idx_name, o, h, l, c, pre, vol, amt,
+                calc_rate(o,pre), calc_rate(h,pre), calc_rate(l,pre), calc_rate(c,pre)]
+        vals.extend([None]*40)  # hour1-4 placeholders + red_ratio
+        vals.append(None)
+        conn.execute('INSERT OR REPLACE INTO index_kline VALUES (' + ','.join(['?']*55) + ')', vals)
+        count += 1
 
 conn.commit()
 conn.close()
@@ -98,5 +115,118 @@ bs.logout()
 print(f'指数K线更新: {count} 条')
 " >> "${LOG_FILE}" 2>&1
 echo "[$(date '+%Y-%m-%d %H:%M:%S')] 指数K线更新完成" >> "${LOG_FILE}"
+
+# [2026-07-29事件根治] 上方指数块只走BaoStock且不检查login错误码, 封禁期
+# 静默写0行(7/27、7/28缺行事故根因) → 缺行检测+腾讯fqkline降级回补。
+# 降级源不能只补个股不补指数; 工具无缺口时零网络请求, 幂等可重跑。
+# 顺序约束: 必须在update_red_ratio.py之前, 新补行的red_ratio才会被补齐。
+IDX_FALLBACK_EXIT=0
+/usr/bin/python3 -u "${SCRIPT_DIR}/backfill_index_kline_tencent.py" >> "${LOG_FILE}" 2>&1 || IDX_FALLBACK_EXIT=$?
+if [ $IDX_FALLBACK_EXIT -ne 0 ]; then
+    echo "[$(date '+%Y-%m-%d %H:%M:%S')] 指数缺行降级回补失败(exit=${IDX_FALLBACK_EXIT})" >> "${LOG_FILE}"
+    mkdir -p /home/AIWealth/logs/realtime
+    echo "[$(date '+%Y-%m-%d %H:%M:%S')] [DATA_INTEGRITY] index_kline缺行且腾讯降级回补失败, 请人工执行: python3 tools/backfill_index_kline_tencent.py" \
+        >> /home/AIWealth/logs/realtime/scheduler_alerts.log
+fi
+
+# 红盘占比盘后生成(补齐所有NULL, 含当日; 策略仅允许次日使用)
+python3 /home/AIWealth/tools/update_red_ratio.py >> "${LOG_FILE}" 2>&1
+echo "[$(date '+%Y-%m-%d %H:%M:%S')] red_ratio红盘占比更新完成" >> "${LOG_FILE}"
+
+# [Task #75] 板块情绪指标盘后增量(sector_emotion_daily, 最近10日幂等重算; 失败不阻断)
+SECTOR_EXIT=0
+python3 /home/AIWealth/tools/sector_emotion.py --daily >> "${LOG_FILE}" 2>&1 || SECTOR_EXIT=$?
+echo "[$(date '+%Y-%m-%d %H:%M:%S')] 板块情绪指标增量完成(exit=${SECTOR_EXIT})" >> "${LOG_FILE}"
+
+# [Task #23] 分钟线盘后增量: 当日持仓股+候选股的5分钟线入独立库 minute.db
+# (BaoStock为主, ifzq mkline m5备份源; 失败会写scheduler_alerts.log, 不阻断后续)
+MINUTE_EXIT=0
+python3 /home/AIWealth/tools/fetch_minute_kline.py --daily "$TODAY" >> "${LOG_FILE}" 2>&1 || MINUTE_EXIT=$?
+echo "[$(date '+%Y-%m-%d %H:%M:%S')] 分钟线盘后增量完成(exit=${MINUTE_EXIT})" >> "${LOG_FILE}"
+
+# ============================================================
+# [Task #10] 数据完整性自检: stock_kline行数 + index_kline当日行
+# 异常时写告警到 scheduler_alerts.log (10分钟监控scheduler会展示)
+# 背景: 2026-07-21/22 BaoStock Broken pipe导致仅3067/3515行且
+# fetch脚本exit=0静默通过, 旧阈值1000过低未能捕获 → 阈值提高到4500
+# ============================================================
+ALERT_FILE="/home/AIWealth/logs/realtime/scheduler_alerts.log"
+mkdir -p "$(dirname "${ALERT_FILE}")"
+/usr/bin/python3 - "$TODAY" >> "${LOG_FILE}" 2>&1 <<'PYCHECK' || true
+import sqlite3, sys
+from datetime import datetime
+
+today = sys.argv[1]
+MIN_ROWS = 4500
+HOUR_COV_MIN = 95.0   # [Task#298] 当日hour1-4覆盖率下限(%)
+ALERT_FILE = '/home/AIWealth/logs/realtime/scheduler_alerts.log'
+conn = sqlite3.connect('file:/home/AIWealth/data/stocks.db?mode=ro', uri=True)
+n = conn.execute('SELECT COUNT(*) FROM stock_kline WHERE date=?',
+                 (today,)).fetchone()[0]
+# [Task#298] hour1-4列完整性: 2026-07-27~08-04封禁期降级源只补日K,
+# hour列静默留NULL达7交易日(tail_mean_h4/S3晚封判定失真)无告警 → 固化自检
+hour_cov = None
+if n > 0:
+    h_ok = conn.execute(
+        'SELECT SUM(hour1_close IS NOT NULL AND hour2_close IS NOT NULL '
+        'AND hour3_close IS NOT NULL AND hour4_close IS NOT NULL) '
+        'FROM stock_kline WHERE date=?', (today,)).fetchone()[0] or 0
+    hour_cov = round(100.0 * h_ok / n, 1)
+# [Task#295] 指数缺口自检泛化: 每个目标指数当日行都必须存在
+IDX_CODES = ['sh.000001', 'sz.399001']
+idx_missing = [c for c in IDX_CODES if conn.execute(
+    'SELECT 1 FROM index_kline WHERE code=? AND date=?',
+    (c, today)).fetchone() is None]
+conn.close()
+
+alerts = []
+# [Task #125] 2026-08-05事故: n==0(降级源也失败)被旧逻辑当节假日静默放行,
+# 次日候选/买入链全瘫。改为0行=FAIL打ERROR(cron仅周一至五跑, 法定节假日
+# 会误报一次, 宁可误报不可静默, 告警中注明可忽略)
+if n == 0:
+    alerts.append(f"[ERROR] stock_kline {today} 为0行! 日K主源+降级源均未入库, "
+                  f"明日候选生成/买入链将瘫痪, 立即回补: "
+                  f"python3 tools/fetch_daily_kline_fallback.py {today} "
+                  f"(若{today}为法定节假日可忽略本条)")
+elif n < MIN_ROWS:
+    alerts.append(f"stock_kline {today} 仅{n}行(<{MIN_ROWS}), 疑似抓取中断, "
+                  f"请回补: python3 tools/fetch_daily_kline.py {today}")
+if n >= MIN_ROWS and idx_missing:
+    alerts.append(f"index_kline {','.join(idx_missing)} 缺 {today} 行, "
+                  f"请回补: python3 tools/backfill_index_kline_tencent.py")
+# [Task#298] 当日hour覆盖<95% → 告警(降级日属预期, 21:30腾讯回补后应复查;
+# 若次日仍低 → 参照t298两轨回补: research/results/t298_hour_backfill/)
+if n >= MIN_ROWS and hour_cov is not None and hour_cov < HOUR_COV_MIN:
+    alerts.append(f"stock_kline {today} hour1-4覆盖率仅{hour_cov}%"
+                  f"(<{HOUR_COV_MIN}%), 降级日属预期但21:30回补后必须复查, "
+                  f"持续缺口照t298两轨回补(minute聚合+BaoStock 60min)")
+if alerts:
+    ts = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+    with open(ALERT_FILE, 'a') as f:
+        for a in alerts:
+            f.write(f"[{ts}] [DATA_INTEGRITY] {a}\n")
+    # [Task#256 G2] P0/ERROR级条目落文件同时实时推企微(失败静默不阻断)
+    try:
+        sys.path.insert(0, '/home/AIWealth')
+        from realtime.notify import push_alert
+        for a in alerts:
+            push_alert(f"🚨 日K完整性门: {a}")
+    except Exception:
+        pass
+    print("!" * 60)
+    for a in alerts:
+        print(f"!!! 数据完整性告警: {a}")
+    print("!" * 60)
+else:
+    print(f"数据完整性自检通过: stock_kline={n}行, hour覆盖={hour_cov}%, "
+          "index_kline当日行="
+          + ('存在' if not idx_missing else '(非交易日跳过)'))
+PYCHECK
+echo "[$(date '+%Y-%m-%d %H:%M:%S')] 数据完整性自检完成" >> "${LOG_FILE}"
+
+# Task#78: 龙虎榜盘后增量(东财源, 3~5请求, 独立lhb.db); 失败只告警不阻断上游
+# (全量回补期间若后台回补器占写锁, 增量会失败——次日回补模式自动补齐, 可容忍)
+python3 /home/AIWealth/tools/lhb_backfill.py --incremental >> "${LOG_FILE}" 2>&1 \
+  || echo "[$(date '+%Y-%m-%d %H:%M:%S')] [ALERT] [LHB] 龙虎榜增量失败(非致命, 回补模式会补齐)" >> /home/AIWealth/logs/realtime/scheduler_alerts.log
 
 echo "[$(date '+%Y-%m-%d %H:%M:%S')] === 每日数据更新结束 ===" >> "${LOG_FILE}"

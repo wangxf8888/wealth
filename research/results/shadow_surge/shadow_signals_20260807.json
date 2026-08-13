@@ -1,0 +1,190 @@
+{
+ "meta": {
+  "strategy": "早盘冲板追击(early_surge_chase_0940) 影子探测",
+  "date": "2026-08-07",
+  "prev_date": "2026-08-06",
+  "mode": "live",
+  "data_source": "qt.gtimg.cn快照(Task#199)",
+  "started_at": "2026-08-07 09:25:01",
+  "finished_at": "2026-08-07 09:50:00",
+  "whitelist": 2240,
+  "watched": 23,
+  "qt_pool": 2239,
+  "no_baseline_prefiltered": 1,
+  "rounds_or_replay_codes": 120,
+  "rate_limit": {
+   "poll_interval_s": 10.0,
+   "min_req_gap_s": 1.0,
+   "max_req_per_round": 4
+  },
+  "skip_counts": {
+   "vol_ratio": 2,
+   "window_out": 1
+  }
+ },
+ "signals": [
+  {
+   "code": "sh.601101",
+   "name": "昊华能源",
+   "confirm_bar": "0935",
+   "confirm_ts": "09:30:09",
+   "confirm_px": 13.54,
+   "buy_bar": "0940",
+   "buy_px": 13.3,
+   "buy_ts": "09:35:00",
+   "vol_ratio": 5.433,
+   "bar_vol": 19407900,
+   "rank_at_cross": null,
+   "rocket": false,
+   "ambiguous_first_cross": false,
+   "winner": false
+  },
+  {
+   "code": "sh.603217",
+   "name": "元利科技",
+   "confirm_bar": "0935",
+   "confirm_ts": "09:34:09",
+   "confirm_px": 24.33,
+   "buy_bar": "0940",
+   "buy_px": 24.0,
+   "buy_ts": "09:35:00",
+   "vol_ratio": 1.99,
+   "bar_vol": 1025600,
+   "rank_at_cross": null,
+   "rocket": false,
+   "ambiguous_first_cross": false,
+   "winner": false
+  },
+  {
+   "code": "sh.600114",
+   "name": "东睦股份",
+   "confirm_bar": "0935",
+   "confirm_ts": "09:30:18",
+   "confirm_px": 30.37,
+   "buy_bar": "0940",
+   "buy_px": 29.66,
+   "buy_ts": "09:35:09",
+   "vol_ratio": 1.946,
+   "bar_vol": 4673800,
+   "rank_at_cross": null,
+   "rocket": false,
+   "ambiguous_first_cross": false,
+   "winner": true
+  },
+  {
+   "code": "sh.600397",
+   "name": "江钨装备",
+   "confirm_bar": "0935",
+   "confirm_ts": "09:30:06",
+   "confirm_px": 18.15,
+   "buy_bar": "0940",
+   "buy_px": 17.49,
+   "buy_ts": "09:35:09",
+   "vol_ratio": 3.116,
+   "bar_vol": 36865500,
+   "rank_at_cross": null,
+   "rocket": false,
+   "ambiguous_first_cross": false,
+   "winner": false
+  },
+  {
+   "code": "sh.600438",
+   "name": "通威股份",
+   "confirm_bar": "0935",
+   "confirm_ts": "09:30:18",
+   "confirm_px": 13.17,
+   "buy_bar": "0940",
+   "buy_px": 12.88,
+   "buy_ts": "09:35:09",
+   "vol_ratio": 2.89,
+   "bar_vol": 31617500,
+   "rank_at_cross": null,
+   "rocket": false,
+   "ambiguous_first_cross": false,
+   "winner": false
+  },
+  {
+   "code": "sh.600654",
+   "name": "中安科",
+   "confirm_bar": "0935",
+   "confirm_ts": "09:30:27",
+   "confirm_px": 3.17,
+   "buy_bar": "0940",
+   "buy_px": 3.13,
+   "buy_ts": "09:35:06",
+   "vol_ratio": 5.636,
+   "bar_vol": 36337900,
+   "rank_at_cross": null,
+   "rocket": false,
+   "ambiguous_first_cross": false,
+   "winner": false
+  },
+  {
+   "code": "sh.603328",
+   "name": "依顿电子",
+   "confirm_bar": "0935",
+   "confirm_ts": "09:30:08",
+   "confirm_px": 10.51,
+   "buy_bar": "0940",
+   "buy_px": 10.85,
+   "buy_ts": "09:35:08",
+   "vol_ratio": 3.386,
+   "bar_vol": 7617700,
+   "rank_at_cross": null,
+   "rocket": true,
+   "ambiguous_first_cross": false,
+   "winner": false
+  },
+  {
+   "code": "sh.600183",
+   "name": "生益科技",
+   "confirm_bar": "0940",
+   "confirm_ts": "09:39:17",
+   "confirm_px": 134.93,
+   "buy_bar": "0945",
+   "buy_px": 135.21,
+   "buy_ts": "09:40:08",
+   "vol_ratio": 1.177,
+   "bar_vol": 5327300,
+   "rank_at_cross": null,
+   "rocket": false,
+   "ambiguous_first_cross": false,
+   "winner": true
+  },
+  {
+   "code": "sh.601865",
+   "name": "福莱特",
+   "confirm_bar": "0945",
+   "confirm_ts": "09:41:29",
+   "confirm_px": 11.37,
+   "buy_bar": "0950",
+   "buy_px": 11.6,
+   "buy_ts": "09:45:08",
+   "vol_ratio": 5.652,
+   "bar_vol": 8222500,
+   "rank_at_cross": null,
+   "rocket": false,
+   "ambiguous_first_cross": false,
+   "winner": true
+  }
+ ],
+ "skips": [
+  {
+   "code": "sh.603655",
+   "bar": "0945",
+   "skip": "vol_ratio",
+   "vr": 24.373
+  },
+  {
+   "code": "sh.603758",
+   "bar": "0945",
+   "skip": "vol_ratio",
+   "vr": 19.358
+  },
+  {
+   "code": "sh.600737",
+   "bar": "0950",
+   "skip": "window_out"
+  }
+ ]
+}

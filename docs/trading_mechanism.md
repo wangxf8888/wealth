@@ -176,6 +176,36 @@ for sig in sorted_signals[:available_slots]:
     allocations.append((sig, allocation_amount))
 ```
 
+### 3.3.1 槽位当日复用与资金流真相（2026-07-31补写, Bill）
+
+**什么是槽位复用**：策略持仓当日到期卖出时，同一策略槽允许当天再买入新标的（如S5双板回调低吸：旧仓10:30定时卖出，同日9:30已按新信号买入）。这是S5的alpha主体——复用日占其买入日的94.4%（1179/1249天），笔数因此1.95x。
+
+**回测与实盘的资金流时序不同（关键真相）**：
+
+```
+回测语义（H1内先卖后买, 回款先到账）:
+  H1: 旧仓卖出 → 回款入现金 ──→ 新仓买入（用的是刚回的款）
+  ✓ 不存在资金挪用
+
+实盘现状（9:30先买, 10:30后卖）:
+  9:30 新仓买入（此时旧仓回款未到!）
+         └─ 实际动用的是其它空槽的备付现金 ←← 挪用发生点
+  10:30 旧仓卖出 → 回款入现金（把挪走的钱补回来）
+  ✗ 若9:30时其它槽同时有买入需求, 正当槽位买入金额会被
+    min(buy_amount, cash) 钳制缩水, 极端时被彻底跳过(<1万)
+```
+
+**历史影响量化**（组合5槽3048笔现金流重放, `scripts/p01_cash_replay_20260731.py`, 2021-01~2026-07）：
+- 现状下9:30现金冲突日535天；正当槽位金额被缩水414天；正当买入被彻底跳过109笔（含S3/S4的+11%级盈利单）。
+- 组合总收益与回测几乎打平（钱没消失，只是分配错了对象），但单策略归因失真+正当槽机会被无差别克扣。
+
+**修复方案（待用户裁决, 详见 `data/realtime/P0_DIAGNOSIS_20260731.md` §2.5）**：
+- C 硬砍：复用槽最低优先级, 现金不足即砍（留痕`skipped_reuse_cash_guard`）——保护完全, 但重放代价CAGR -37pp（复用即S5 alpha主体）
+- C2 缩水买：正当槽足额优先, 复用槽只用剩余现金——保护强度同C, 代价-21pp（Bill建议首选）
+- ~~D 延迟复用买入至10:30回款后~~：**实测否决**——复用笔均pnl +0.65%→-0.28%（六年五负）, 标的9:30→10:30均漂+0.94%, 9:30买点本身即alpha（`scripts/p01_planD_test_20260731.py`）
+
+**卖出顺延双持仓场景**：timed卖出遇跌停封死顺延至次日, 该槽出现新旧双持仓过夜（回测不存在的敞口）。规则：次日任意检查即刻优先卖旧仓（到期日早者先卖）；期间前端应标注"槽位复用中(10:30释放)"。
+
 ### 3.4 买入执行
 
 **执行流程**（按排序顺序逐笔）：
@@ -184,29 +214,29 @@ for sig in sorted_signals[:available_slots]:
 for i, (signal, amount_to_buy) in enumerate(allocations):
     if used_slots >= n_slots:
         break  # 仓位满
-    
+
     # 再次合规检查
     buy_price = signal['buy_price']  # 通常为hour1_open
     preclose = signal['preclose']
     code = signal['code']
-    
+
     if buy_price >= limit_up_price(code, preclose):
         continue  # 合规失败
-    
+
     # 应用买入滑点
     actual_buy_price = buy_price × (1 + 0.002)
-    
+
     # 应用单笔资金上限（如果配置）
     if max_per_trade > 0:
         slot_amount = min(amount_to_buy, max_per_trade)
     else:
         slot_amount = amount_to_buy
-    
+
     # 计算股数（100股为最小单位）
     shares = int(slot_amount / actual_buy_price / 100) × 100
     if shares < 100:
         continue  # 资金不足
-    
+
     # 记录持仓
     positions.append({
         'code': code,
@@ -219,7 +249,7 @@ for i, (signal, amount_to_buy) in enumerate(allocations):
         'strategy_name': signal['strategy_name'],
         'score_at_buy': signal['score'],
     })
-    
+
     cash -= shares × actual_buy_price
     used_slots += 1
 ```
@@ -373,21 +403,21 @@ def _process_sells(date):
     for position in positions:
         if position['hold_days'] == 0:
             continue  # T+1约束：当天买入跳过卖出
-        
+
         # 一字跌停特殊处理
         if is_oneword_limit_down(row):
             if position['hold_days'] >= max_hold_days * 2:
                 # 超时安全阀：即使跌停也强制退出
                 sell(close_price, '强制退出')
             continue  # 正常跳停则跳过
-        
+
         # 逐hour检查卖出条件（hour1-4）
         sold = False
         for hour in range(1, 5):
             hour_data = row[f'hour{hour}_*']
             if hour_data['open'] <= 0:
                 continue  # 数据缺失
-            
+
             # 调用所有卖出策略
             for sell_strategy in sell_strategies:
                 should_sell, sell_price, reason = sell_strategy.should_sell(
@@ -396,23 +426,23 @@ def _process_sells(date):
                 if should_sell and sell_price > 0:
                     # 应用卖出滑点
                     actual_sell_price = sell_price × (1 - 0.002)
-                    
+
                     # 合规检查：不能在跌停价或以下卖出
                     if is_limit_down_cannot_sell(actual_sell_price, preclose, code):
                         continue
-                    
+
                     sell(actual_sell_price, reason)
                     sold = True
                     break  # 任一策略触发则退出hour循环
-            
+
             if sold:
                 break  # 已卖出，退出hour循环
-        
+
         # 卖出失败时，日级数据fallback
         if not sold and all_hours_invalid:
             # 使用日级OHLC重新检查卖出
             ...
-        
+
         # 超时安全阀
         if not sold and position['hold_days'] >= max_hold_days * 2:
             sell(day_close, '强制退出')
@@ -443,12 +473,12 @@ def _is_oneword_limit_down(row):
     preclose = row['preclose']
     ratio = _get_limit_ratio(code)
     limit_down_price = round(preclose * (1 - ratio), 2)
-    
+
     o = row['open']
     h = row['high']
     l = row['low']
     c = row['close']
-    
+
     # 必须四价相等
     if abs(o - h) < 0.001 and abs(o - l) < 0.001 and abs(o - c) < 0.001:
         # 且价格<=跌停价
@@ -477,6 +507,29 @@ actual_sell_price = signal_price × (1 - 0.002)  # 单边0.2%
 # 即：先确定signal_price，再应用滑点，最后检查跌停合规
 ```
 
+### 4.5 止损损失谱真值（2026-08-10 Task#256补写, 数据源t254风险审计）
+
+**核心事实：名义止损线≠实际损失**。跳空低开、跌停顺延、滑点三因素叠加，
+实际成交损失系统性劣于名义SL线。仓位/风险预算必须按真值口径计提。
+
+| 策略 | 名义SL | 实际均值 | P95 | 历史最差 | 样本 |
+|---|---|---|---|---|---|
+| S1 首板低吸 | -8% | -8.78% | -13.02% | -15.26% | 52笔 |
+| S3 创科晚封 | -20% | -21.27% | -25.67% | -26.26% | 12笔 |
+| S4 大阳低吸 | -6% | -7.57% | -12.26% | **-18.74%** | 141笔 |
+
+- **跌停顺延笔额外损失**：均值-2.82pp，最差-6.33pp（相对名义线）
+- **仓位预算口径**：单笔最大损失按 `名义SL + 5pp` 计提（覆盖P95档），
+  极端情形（S4口径-18.74%）由组合层分散承担，不做单笔预算
+
+**跌停顺延现行为注记**（position_tracker.py 代码走查确认，仅记录不改代码）：
+- 持仓已封跌停 → `is_at_limit_down` 拦截 → `blocked=True` 卖单顺延下次检查
+  （到期强平同理，见 position_tracker.py 框架级兜底逻辑）
+- 开板后任意一次检查即刻执行卖出——daemon为10秒粒度，cron兜底为30分钟粒度
+- timed模式跨日未卖（跌停封死顺延/停牌）→ 之后任意检查即刻卖出
+- 即：现行为已是"跌停开板即卖"，无需改动；损失谱中的顺延超额损失
+  是该机制下的固有成本，已计入上表真值
+
 
 ## 五、日内处理时序
 
@@ -485,16 +538,16 @@ actual_sell_price = signal_price × (1 - 0.002)  # 单边0.2%
 ```python
 def _process_day(date):
     """每个交易日的完整处理流程"""
-    
+
     # 步骤1：先处理卖出（优先级最高）
     _process_sells(date)
-    
+
     # 步骤2：再处理买入
     _process_buys(date)
-    
+
     # 步骤3：最后更新持仓信息
     _update_positions(date)
-    
+
     # 步骤4：更新净值
     portfolio.update_daily(date)
 ```
@@ -504,16 +557,16 @@ def _process_day(date):
 ```python
 def _update_positions(date):
     """日终更新所有持仓的动态信息"""
-    
+
     for position in positions:
         # (1) hold_days + 1
         position['hold_days'] += 1
-        
+
         # (2) 更新current_price（用于计算持仓盈亏）
         code = position['code']
         if code in today_price_map:
             position['current_price'] = today_price_map[code]
-            
+
             # (3) 追踪max_price（用于移动止损等）
             if today_price_map[code] > position['max_price']:
                 position['max_price'] = today_price_map[code]
@@ -527,7 +580,7 @@ def _process_sells(date):
         # T+1约束：hold_days==0表示今天买入，明天才能卖
         if position['hold_days'] == 0:
             continue  # 跳过卖出检查
-        
+
         # 其余持仓正常检查卖出条件
         ...
 ```
@@ -619,8 +672,8 @@ def _get_limit_ratio(code):
 
 **一字板的严格定义**：
 ```
-four_prices_equal = (abs(open - high) < 0.001 AND 
-                     abs(open - low) < 0.001 AND 
+four_prices_equal = (abs(open - high) < 0.001 AND
+                     abs(open - low) < 0.001 AND
                      abs(open - close) < 0.001)
 ```
 
@@ -667,14 +720,14 @@ for year in sorted(years):
     # 加载该年度及其前HISTORY_LOOKBACK(20)天的数据
     hist_start_idx = max(0, year_start_idx - 20)
     hist_start_date = dates[hist_start_idx]
-    
+
     # 加载数据到内存
     data_by_code = load_date_range_data(hist_start_date, year_end)
-    
+
     # 年度内日期循环
     for date in year_dates:
         process_day(date)
-    
+
     # 处理完后释放数据
     del data_by_code
 ```
@@ -701,7 +754,7 @@ CONFIG = {
         'initial_capital': 1_000_000,  # 初始资金
         'n_slots': 5,                  # 最大仓位数
     },
-    
+
     # ===== 7个指标配置 =====
     'indicators': {
         'big_drop_gap_up': {
@@ -714,20 +767,20 @@ CONFIG = {
         # ... 其余6个指标 ...
     },
     'score_threshold': 3,  # 星级模式最低阈值
-    
+
     # ===== 买入策略 =====
     'buy_strategies': ['score', 'vshape'],
-    
+
     # ===== 卖出策略 =====
     'sell_strategies': ['fixed_tpsl', 'time_limit'],
     'sell_params': {
         'fixed_tpsl': {'tp_pct': 10.0, 'sl_pct': -3.0},
         'time_limit': {'max_hold_days': 5, 'exit_hour': 4},
     },
-    
+
     # ===== 持仓策略 =====
     'position_strategy': 'equal_weight',
-    
+
     # ===== 选股过滤 =====
     'filters': {
         'exclude_st': True,
@@ -779,3 +832,46 @@ backtest_scoring_system.py（主驱动）
 └── position_strategies.py（仓位）
 ```
 
+
+## BaoStock统一预算退出码语义（Task#259/#265, 2026-08-10）
+
+自2026-08-10起，BaoStock数据抓取链接入统一日预算账本（`tools/baostock_budget.py`，
+4万次/日硬控，官方5万线留1万安全边际）。以下退出码属**资源控制事件，而非抓取失败**，
+值守与日更链巡检时勿按故障处理：
+
+| 退出码 | 脚本 | 语义 | 后续动作 |
+|---|---|---|---|
+| exit=5 | `tools/fetch_daily_kline.py` | 日预算耗尽优雅停（commit保留进度+scheduler_alerts告警） | 断点续传次日自动续跑 |
+| exit=4 | `tools/fetch_minute_kline.py` | 预算封顶保留进度（budget_denied优雅收工） | 次日续跑，进度不丢 |
+
+配套语义：`baostock_recovery.py` s2及各步预算拒绝时走既有`paused_budget`状态次日续；
+`baostock_recovery_probe.py` login探测预算拒绝时本轮跳过（下一小时cron自然重试）。
+
+### 用量统计口径注记
+2026-08-10当日的心跳"BaoStock当日API用量"板块数据不含旧版t233进程流量
+（该进程启动于统一账本上线前，未接入计数）——统一账本自8/11起全量生效，
+当日历史数据/报告解读时用量存在少量低估，属已知一次性偏差。
+
+## S3创科晚封冻结机制（Task#285，用户批准A案 2026-08-11）
+
+**机制**（依据 `research/results/t283_s3_freeze_pack/DECISION_PACK.md` §2）：
+
+- **冻结名单**：`realtime/config.py` 的 `STRATEGY_FROZEN = ['gem_star_late_seal']`，
+  消费方（morning_decision/generate_candidates）防御式导入，任何异常降级为不冻结不炸主链；
+- **候选链**：21:30候选照常生成（Task#303自23:30前移），slot顶层加`"frozen": true`标注（只标注不剔除）；
+- **决策链**：9:25照常live复筛+入场守卫，产出的recommendations转入
+  `frozen_recommendations`并清空——`allocate_idle_slots`只处理有recommendations的通道，
+  S3自然退出槽位竞争，空槽由V-C机制自动分给其余4策略（与A案回测语义一致，
+  零改槽位分配代码）；存量持仓出场链零改动，正常走完TP/SL/到期；
+- **假想跟踪**：`tools/shadow_ledger.py`（每日15:20）读decision json的
+  frozen_recommendations，按S3现行买卖规则纸面模拟（决策日开盘买，T+1禁卖，
+  次日逐小时TP+12%/SL-20%挂单语义，hour4收盘到期，净收益扣双边0.1%费用），
+  记录笔均/胜率/滚动3月月化，台账见 `research/results/shadow_surge/SHADOW_LEDGER.md`
+  的"S3冻结假想池"区块；
+- **前端**：候选卡标"🧊已冻结待替换"+候选置灰+说明行（signal.html读frozen字段）。
+
+**复活条件**：假想池滚动3月月化回正 且 笔均>+0.5% → 提交G3引擎验证+用户批准，
+不自动复活。
+
+**回滚方法**：删/清空 `realtime/config.py` 的 `STRATEGY_FROZEN` 一行（改为`[]`）即恢复
+S3正常买入，其余改动（标注/假想池/前端）均为无frozen字段时的自然空转，无需回滚。

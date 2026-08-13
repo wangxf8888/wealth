@@ -1,0 +1,156 @@
+561-let liveNavData = [];              // 资金曲线原始数据(equity_curve)
+562-let liveRealizedPnl = 0;          // 已实现盈亏(来自closed_trades)
+563:let liveDataReady = false;        // Task#322: 账户数据就绪前不盯市(防cash=0算出-100%脏点)
+564:let pieDataSig = '';              // Task#322 bug3: 饼图数据签名, 实质变化(约0.1pp)才重绘
+565:let lastPieCompo = '';            // Task#322 bug3: 持仓构成签名, 构成变化才重建饼图实例
+566-
+567-function initNavChart(navData, mode) {
+568-  const dom = document.getElementById('navChart');
+569-  if (!dom) return;
+570-  navChartInstance = echarts.init(dom, 'dark');
+571-
+572-  const dates = navData.map(d => d.date);
+573-  const returns = navData.map(d => d.return_pct);
+--
+635-  const option = {
+636-    backgroundColor: 'transparent',
+637:    animation: false,  // Task#322 bug3: 禁入场/更新动画, 根治每次刷新扇区摆动
+638-    tooltip: { trigger: 'item', backgroundColor: '#141d2b', borderColor: '#1a2436', textStyle: { color: '#e8edf5', fontSize: 12 }, formatter: '{b}: {d}%' },
+639-    series: [{
+640-      type: 'pie', radius: ['42%', '72%'], center: ['50%', '52%'],
+641-      label: { color: '#7a8ba5', fontSize: 11, formatter: '{b}\n{d}%' },
+642-      labelLine: { lineStyle: { color: '#2a3a52' } },
+643-      emphasis: { itemStyle: { shadowBlur: 10, shadowColor: 'rgba(0,0,0,0.3)' } },
+644-      data: data
+645-    }]
+--
+711-    livePositions = holdings.map(p => ({ code: p.code, name: p.name, buy_price: p.buy_price, buy_amount: p.buy_amount || liveInitialCapital / 5 }));
+712-    liveRealizedPnl = liveStats.realized_pnl || 0;
+713:    liveDataReady = true;  // Task#322: 盯市基础数据就绪
+714-
+715-    const kpiNav = document.getElementById('kpiNav');
+716-    const kpiReturn = document.getElementById('kpiReturn');
+717-    const kpiHolding = document.getElementById('kpiHolding');
+718-    const kpiTrades = document.getElementById('kpiTrades');
+719-    const kpiWinRate = document.getElementById('kpiWinRate');
+720-
+721-    kpiNav.textContent = '¥' + Math.round(totalNav).toLocaleString();
+--
+793-    document.getElementById('kpiHolding').textContent = holdings.length;
+794-
+795:    // Task#322 bug2: 复用本次/api/positions结果同步盯市基础数据(不新增API轮询);
+796-    // 日内买卖后livePositions/liveCash随10s刷新链自动更新, 曲线尾点盯市不再只靠首屏一次性取数
+797-    const acctNow = d.account || {};
+798-    liveInitialCapital = acctNow.initial_capital || liveInitialCapital;
+799-    if (acctNow.cash != null) liveCash = acctNow.cash;
+800-    livePositions = holdings.map(p => ({ code: p.code, name: p.name, buy_price: p.buy_price, buy_amount: p.buy_amount || liveInitialCapital / 5 }));
+801-    liveDataReady = true;
+802-
+803:    // Pie Chart - Task#322 bug3: 仅首次建实例/持仓构成变化时重建;
+804-    // 否则保留实例由updateNavRealtime按实质变化原地更新, 根治每10s整图重建带入场动画的晃动
+805-    const pieCompo = holdings.map(p => p.code).sort().join(',');
+806-    if (!pieChartInstance || pieCompo !== lastPieCompo) {
+807-      initPieChart(holdings, 1000000);
+808-      lastPieCompo = pieCompo;
+809-      pieDataSig = '';  // 构成变化后强制下一次市值更新生效
+810-    }
+811-
+--
+866-    posEl.innerHTML = html;
+867-
+868:    // Task#322 bug1: 重建后同一JS任务内立即用缓存回填(无网络开销) ——
+869-    // 中间不经任何await/paint, 浏览器永远看不到'--'占位态(原子替换);
+870-    // 原先等masterRefresh链尾Promise.allSettled(含慢的loadCandidates 4串行请求)才回填,
+871-    // 窗口期可达数百毫秒→用户看到的"先--再出值"跳动即此。'--'仅首屏无缓存/行情真缺失时出现
+872-    applyQuotes(lastQuotes);
+873-
+874-    // Task#285追加A: 新行情拉取仍统一由调用方链尾(masterRefresh/init)的refreshQuotes承担,
+875-    // 此处不再内联调用, 避免每tick双重批量请求
+876-
+--
+894-  if (!sec || !tbl) return;
+895-  if (!soldTrades.length) { sec.style.display = 'none'; return; }
+896:  const reasonMap = {take_profit:'止盈触发', stop_loss:'止损触发', trailing_stop:'追踪止盈', max_hold:'持仓到期', expired:'到期卖出', h1_touch:'触板兑现'};
+897-  let html = '<table class="data-table"><thead><tr>' +
+898-    '<th>策略</th><th>股票</th><th>买入价</th><th>卖出价</th>' +
+899-    '<th>收益率</th><th>卖出原因</th><th>实时现价·当日涨跌·较卖价</th>' +
+900-    '</tr></thead><tbody>';
+901-  soldTrades.forEach(function(t) {
+902-    const pnl = t.pnl_pct || 0;
+903-    const pnlCls = pnl >= 0 ? 'badge-profit' : 'badge-loss';
+904-    const reason = reasonMap[t.sell_reason] || t.sell_reason || '';
+--
+992-    const pnlCls = pnl >= 0 ? 'badge-profit' : 'badge-loss';
+993-    const pnlStr = (pnl >= 0 ? '+' : '') + pnl.toFixed(2) + '%';
+994:    const reasonMap = {take_profit:'止盈',stop_loss:'止损',expired:'到期',trailing_stop:'追踪止盈',max_hold:'持仓到期',h1_touch:'触板兑现'};
+995-    const reason = reasonMap[p.sell_reason] || p.sell_reason || '--';
+996-    const reasonCls = (p.sell_reason === 'take_profit' || p.sell_reason === 'trailing_stop') ? 'badge-tp' : p.sell_reason === 'stop_loss' ? 'badge-sl' : 'badge-expired';
+997-    const srcBadge = p.source === 'live' ? '<span style="color:var(--gold);font-size:10px;">实盘</span>' : '<span style="color:var(--text3);font-size:10px;">回测</span>';
+998-    html += '<tr>' +
+999-      '<td style="color:var(--blue);">' + p.code + '<br/><span style="color:var(--text);font-size:11px;">' + (p.name || '') + '</span></td>' +
+1000-      '<td><span class="badge-strategy">' + (p.strategy_tag || '') + ' ' + (p.strategy_cn || p.strategy || '') + '</span></td>' +
+1001-      '<td>' + (p.buy_date || '') + '</td>' +
+1002-      '<td>' + (p.sell_date || '') + '</td>' +
+--
+1378-
+1379-    list.innerHTML = html;
+1380:    // Task#322 bug1: 候选区重建后同任务内缓存回填, 与持仓表同原则(新值到达才替换, 不留空窗口)
+1381-    applyQuotes(lastQuotes);
+1382-  } catch(e) {
+1383-    document.getElementById('candidatesList').innerHTML = '<div class="empty-state"><div class="msg">加载失败</div></div>';
+1384-  }
+1385-}
+1386-
+1387-// Task#209: 候选自助取消/恢复 → POST写user_excluded.json(日期键数组+_log留痕), 成功后重绘候选区
+1388-async function toggleExcludeCand(code, exclude) {
+--
+1407-function updateNavRealtime(quotesData) {
+1408-  if (currentMode !== 'live') return;
+1409:  if (!liveDataReady) return;  // Task#322: 账户数据未就绪不盯市(防cash=0算出脏点)
+1410-
+1411-  // 1. 重新计算总资产 = 现金 + sum(每个持仓当前市值) (Task#82口径对齐);
+1412:  // Task#322: 全平仓日(livePositions空)也继续 —— nav=现金, 曲线尾点仍须反映当日已实现盈亏
+1413-  let marketValue = 0;
+1414-  let pieData = [];
+1415-  livePositions.forEach(function(p) {
+1416-    const quote = quotesData[p.code];
+1417-    const currentPrice = (quote && quote.price > 0) ? quote.price : p.buy_price;
+1418-    const posValue = p.buy_amount * (currentPrice / p.buy_price);
+1419-    marketValue += posValue;
+1420-    pieData.push({ name: (p.name || p.code.split('.')[1] || p.code), value: Math.round(posValue) });
+--
+1427-  // 此处不再双写, 避免两套口径互相覆盖闪跳。
+1428-
+1429:  // 4. 更新资金曲线当日点(Task#322 bug2: 仅交易时段盯市, 改写/追加严格锁定今日日期键 ——
+1430-  // 后端曲线尾点不是今天时追加新点而非误改昨日历史点; 盘后不动曲线, 以19:00盯市快照为准)
+1431-  if (navChartInstance && liveNavData.length > 0 && isTradeSession()) {
+1432-    const now = new Date();
+1433-    const todayKey = now.getFullYear() + '-' + String(now.getMonth() + 1).padStart(2, '0') + '-' + String(now.getDate()).padStart(2, '0');
+1434-    let lastIdx = liveNavData.length - 1;
+1435-    if (liveNavData[lastIdx].date === todayKey) {
+1436-      liveNavData[lastIdx].nav = Math.round(currentNav);
+1437-      liveNavData[lastIdx].return_pct = parseFloat(returnPct.toFixed(2));
+--
+1466-  }
+1467-
+1468:  // 5. 更新饼图(Task#322 bug3: 份额签名量化到0.1pp, 无实质变化的轮询不碰饼图;
+1469-  // 变化时也只原地setOption数据(实例已禁动画), 不重建不摇摆)
+1470-  if (pieChartInstance && pieData.length > 0) {
+1471-    pieData.push({ name: '现金', value: Math.round(liveCash), itemStyle: { color: '#2a3a52' } });
+1472-    const total = pieData.reduce(function(s, x) { return s + x.value; }, 0) || 1;
+1473-    const sig = pieData.map(function(x) { return x.name + ':' + Math.round(x.value / total * 1000); }).join('|');
+1474-    if (sig !== pieDataSig) {
+1475-      pieDataSig = sig;
+1476-      pieChartInstance.setOption({
+--
+1537-    });
+1538-
+1539:    // Task#322 bug4: 收盘后卡片改用 /api/live/equity 同源权威口径(收盘价盯市)。
+1540-    // 根因: 盘后卡片锁死在intraday_snapshot最后一帧盘中价(约14:59, 不含收盘集合竞价),
+1541-    // 与曲线/盘后通知的19:00收盘价盯市差0.17pp(12.30 vs 12.13, 收盘价复算判定12.13为正)。
+1542-    // 仅在收盘后渲染一次的路径触发(kpiClosedRendered后停轮询), 不新增盘中轮询
+1543-    if (!inSession) {
+1544-      const eq = await fetchJSON('/api/live/equity' + bust).catch(function() { return null; });
+1545-      if (eq && eq.current_nav > 0) nav = eq.current_nav;
+1546-    }
+1547-

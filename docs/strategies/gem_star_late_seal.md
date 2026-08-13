@@ -1,4 +1,4 @@
-# 创科晚封涨停次日策略 (gem_star_late_seal)
+# 创科晚封（正名）·创科晚封涨停次日策略 (gem_star_late_seal)
 
 ## 1. 策略概览
 
@@ -130,9 +130,26 @@
 4. **sell_day_no_buy**：卖出当天不开新仓，可能错过连续信号
 5. **日级TP-priority**：实盘中需在每小时bar结束时检查是否触TP，H4结束时补充用daily数据检测
 
+### 毒区地图（Task#83败因解剖，2026-07-30，实盘人工避雷用）
+2021-2026全期464笔解剖，最强结构轴=**涨停日首触涨停时段(seal_h)**，单调梯度无孤峰：
+
+| 首触时段 | n(占比) | 胜率 | 笔均 |
+|---|---|---|---|
+| H1触板回封 | 58 (12.5%) | 63.8% | +4.38% |
+| H2 | 155 (33.4%) | 55.5% | +2.34% |
+| H3 | 161 (34.7%) | 47.2% | +0.71% |
+| H4尾盘板 | 89 (19.2%) | 44.9% | +0.06% |
+
+叠加毒区：seal_h≥3且涨停日放量≥3倍（volx_p≥3）——129笔(27.8%)笔均-0.22%，但年度稳定性弱（4/6负年，2022/2026为正）。
+
+**⚠️ 为什么没有据此升级参数**：引擎精测三组过滤器（seal≤2/seal≤3/剔交集）全部否决——slot=1+prev_turn升序取1的补位语义下，池级过滤=换整条交易路径（G1同笔重叠仅29.5%，CAGR从+130.77%崩至+0.38%；G2/G3盲段或MDD/负年红线不过），与S2解剖结论同构：「毒区真实」≠「剔毒区可执行」。
+
+**实盘人工避雷建议**：同日多候选时优先选早触板回封（seal_h≤2）+缩量板（volx<3）标的；仅作同等条件下的tie-break，不作硬过滤。详见 `data/realtime/RESEARCH_S4_S3_ANATOMY.md` §2-§4。
+
 ---
 
 ## 文件清单
 - 策略代码：`strategies/gem_star_late_seal.py`
 - 回测明细(JSON)：`frontend/data/gem_star_late_seal_trades.json`
 - 回测明细(TXT)：`logs/backtest/gem_star_late_seal_detail.txt`
+- **solo档案(可执行口径+干净数据, Task#33)**：`logs/backtest/solo/gem_star_late_seal_{trades.json,detail.txt}`（+132.83%/464笔, 总表见 `data/realtime/solo_strategy_registry.md`）

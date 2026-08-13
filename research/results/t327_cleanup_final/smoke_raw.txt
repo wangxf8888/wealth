@@ -1,0 +1,71 @@
+冒烟1 crontab引用:
+PASS /home/AIWealth/research/results/t291_backfill_p2/nightly_cron.sh
+PASS /home/AIWealth/tools/daily_update.sh
+PASS realtime/generate_candidates.py
+PASS realtime/intraday_monitor.py
+PASS realtime/morning_decision.py
+PASS realtime/position_tracker.py
+PASS tools/announcement_monitor.py
+PASS tools/backfill_hour_tencent.py
+PASS tools/baostock_recovery_probe.py
+PASS tools/baostock_recovery.py
+PASS tools/board_lab_collector.py
+PASS tools/board_lab_miner.py
+PASS tools/daily_heartbeat.py
+PASS tools/daily_plan_report.py
+PASS tools/daily_review_report.py
+PASS tools/execution_quality.py
+PASS tools/fetch_earnings_calendar.py
+PASS tools/fetch_minute_sina.py
+PASS tools/fetch_sector_limitup.py
+PASS tools/lhb_backfill.py
+PASS tools/nightly_rolling.sh
+PASS tools/observe_firstrun.sh
+PASS tools/progress_scheduler.py
+PASS tools/shadow_ledger.py
+PASS tools/strategy_health.py
+PASS tools/weekly_solo_refresh.sh
+冒烟2 import:
+PASS import strategies.amplitude_reversal
+PASS import strategies.big_yang_low_open_v2
+PASS import strategies.firstboard_low_open_dip_v2
+PASS import strategies.gem_star_late_seal
+PASS import strategies.two_board_pullback_dip_h1c
+PASS import strategies.firstboard_low_open_dip
+PASS import strategies.two_board_pullback_dip
+PASS import strategies
+PASS import backtest.run_unified
+PASS import backtest.engine
+PASS import backtest.promo_gate
+PASS import backtest.run
+PASS import backtest.portfolio
+PASS import realtime.generate_candidates
+PASS import realtime.morning_decision
+PASS import realtime.position_tracker
+PASS import realtime.intraday_monitor
+PASS import realtime.notify
+PASS import realtime.promo_gate
+PASS import realtime.data_feed
+PASS import realtime.config
+PASS import realtime.earnings_calendar
+PASS import trading_rules
+PASS import execution_core
+PASS import tick_scheduler
+冒烟3 serverAPI:
+PASS /api/positions 200
+PASS /api/candidates/latest 200
+PASS /api/decision/latest 200
+PASS /api/live/equity 200
+PASS /api/status 200
+PASS /api/strategies 200
+PASS /api/backtest/summary 200
+PASS /api/index_quotes 200
+PASS /api/test_signals 200
+冒烟4 明晨链路:
+PASS realtime/generate_candidates.py
+PASS realtime/morning_decision.py
+PASS realtime/position_tracker.py
+PASS realtime/notify.py
+PASS realtime/intraday_monitor.py
+PASS data/realtime/candidates_20260813.json
+PASS data/realtime/positions.json

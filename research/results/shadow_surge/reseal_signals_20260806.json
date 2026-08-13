@@ -1,0 +1,14 @@
+{
+ "meta": {
+  "strategy": "回封首板(seal_reseal_v1, Task#232)",
+  "date": "2026-08-06",
+  "mode": "live",
+  "started_at": "2026-08-08 15:28:21",
+  "rule": "V1: T3(1005-1130)首封∩开板重封>=1∩首板∩收盘封死∩非ST/bj/上市<90d; D+1开盘买 TP5/SL-8/H3",
+  "replay_baseline": "31日回放(2026-06-26~08-07): slot=1月化+32.6%/胜率75%; 笔级n=89 净+1.08%/胜率68.5%",
+  "status": "events_missing",
+  "drop_counts": {},
+  "finished_at": "2026-08-08 15:28:21"
+ },
+ "signals": []
+}

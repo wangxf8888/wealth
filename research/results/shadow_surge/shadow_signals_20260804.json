@@ -1,0 +1,21 @@
+{
+ "meta": {
+  "strategy": "早盘冲板追击(early_surge_chase_0940) 影子探测",
+  "date": "2026-08-04",
+  "prev_date": "2026-08-03",
+  "mode": "dry-run",
+  "started_at": "2026-08-05 10:07:09",
+  "finished_at": "2026-08-05 10:07:10",
+  "whitelist": 2328,
+  "watched": 0,
+  "rounds_or_replay_codes": 0,
+  "rate_limit": {
+   "poll_interval_s": 10.0,
+   "min_req_gap_s": 1.0,
+   "max_req_per_round": 4
+  },
+  "skip_counts": {}
+ },
+ "signals": [],
+ "skips": []
+}

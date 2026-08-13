@@ -1,0 +1,375 @@
+# Task#327 删除清单 DELETE_MANIFEST (生成于 2026-08-13 14:51:01, 删除执行前落盘)
+
+## 0. 运行时依赖保留(research/results/下, leader批准, MR评审重点)
+| 目录 | 依赖方 |
+|---|---|
+| research/results/shadow_surge/ | tools/shadow_ledger.py(cron 15:20, SS_DIR=L77读写) + tools/fetch_minute_sina.py(cron 16:30, SHADOW_DIR=L51) + server.py L553/L663/L695影子信号API |
+| research/results/t228_surge_replay/ | tools/shadow_ledger.py L87 REPLAY_TRADES硬编码读取 |
+| research/results/board_lab/ | tools/board_lab_miner.py(cron 15:10)输出目录 |
+| research/results/t291_backfill_p2/ | crontab两条活跃条目(16:10每日/20:40工作日)执行其nightly_cron.sh |
+审计留证保留: t311_promo_menu t313_sentinel_0812 t319_promo_c_backtest t320_promo_c_live t321_promo_c_qa t322_frontend_fix(Wilbur在用) t327_cleanup_final(本任务留证)
+
+## 1. strategies/ 未上线旧版 【勘误2026-08-13 16:35: 本节2文件已恢复并移回白名单】
+原判"grep全仓无生产引用"系核查缺陷(grep -vE过滤整行漏掉v2/h1c的import行)；
+实际在产v2/h1c继承它们作基类。冒烟2 FAIL后经/dev/vda3磁盘雕刻恢复(字节精确
+一致13903B/13506B含t299修复)，solo对拍PASS，git commit 4d94852固化。净删除
+统计已扣除这2文件。
+- strategies/firstboard_low_open_dip.py (13903B)
+- strategies/two_board_pullback_dip.py (13506B)
+
+## 2. research/results/ 死案目录与散落文件 (保留11项之外全部)
+- [DIR] research/results/amplitude_reversal_amexit (256K)
+- [DIR] research/results/block_trade (16K)
+- [DIR] research/results/clean_universe_incubator (284K)
+- [DIR] research/results/combo_4strategy_s3out (1.6M)
+- research/results/early_surge_chase_ref.out (1126B)
+- [DIR] research/results/profit_dna (32K)
+- research/results/README.md (3517B)
+- research/results/REPORT_task56_margin_liquidation.md (4817B)
+- [DIR] research/results/slot_allocation_optimization (224K)
+- research/results/t0_run.log (2188B)
+- [DIR] research/results/t136_st_audit (696K)
+- [DIR] research/results/t143_st_cleanup (20K)
+- [DIR] research/results/t153_ice_recalib (1.4M)
+- [DIR] research/results/t154_data_source_scout (20K)
+- [DIR] research/results/t159_s1s5_recheck (28K)
+- [DIR] research/results/t163_disk_cleanup (48K)
+- [DIR] research/results/t165_s2_structure (312K)
+- [DIR] research/results/t169_drawdown_scale (104K)
+- [DIR] research/results/t170_s2_promote (32K)
+- [DIR] research/results/t172_pipeline_replenish (56K)
+- [DIR] research/results/t173_s2_promote_qa (120K)
+- [DIR] research/results/t174_boost_engine (100K)
+- [DIR] research/results/t175_morning_sentinel_0806 (12K)
+- [DIR] research/results/t178_shadow_audit (56K)
+- [DIR] research/results/t183_shadow_fix (52K)
+- [DIR] research/results/t184_frontend_turnover (16K)
+- [DIR] research/results/t185_notify_holdings_fix (40K)
+- [DIR] research/results/t187_unified_package (88K)
+- [DIR] research/results/t191_baostock_upgrade (20K)
+- [DIR] research/results/t192_vacuum (12K)
+- [DIR] research/results/t194_probe_throttle (28K)
+- [DIR] research/results/t195_rt_minute_source (16K)
+- [DIR] research/results/t196_archive_compress (32K)
+- [DIR] research/results/t197_disk_expand (8.0K)
+- [DIR] research/results/t198_research_cleanup (32K)
+- [DIR] research/results/t201_throttle_harden (60K)
+- [DIR] research/results/t202_sentinel_0807 (464K)
+- [DIR] research/results/t203_mutex_gate (76K)
+- [DIR] research/results/t204_promote_backtest (32K)
+- [DIR] research/results/t205_promote_realtime (60K)
+- [DIR] research/results/t206_promote_qa (12K)
+- [DIR] research/results/t207_candidates_fix (68K)
+- [DIR] research/results/t209_frontend_batch (40K)
+- [DIR] research/results/t211_fetch_selfcheck (56K)
+- [DIR] research/results/t213_shadow_tracker (20K)
+- [DIR] research/results/t215_board_lab (28K)
+- [DIR] research/results/t216_api_inventory (24K)
+- [DIR] research/results/t218_api_onboard (72K)
+- [DIR] research/results/t219_688_volfix (32K)
+- [DIR] research/results/t220_0807_datafix (28K)
+- [DIR] research/results/t221_turn_kline (524K)
+- [DIR] research/results/t222_dblock_fix (84K)
+- [DIR] research/results/t229_test_signal_mode (64K)
+- [DIR] research/results/t230_seal_order (568K)
+- [DIR] research/results/t231_open_rank (5.9M)
+- [DIR] research/results/t232_reseal_shadow (4.0K)
+- [DIR] research/results/t233_touchboard_backfill (6.1M)
+- [DIR] research/results/t234_boardlab_fix (72K)
+- [DIR] research/results/t235_s1_sealq (4.0K)
+- [DIR] research/results/t236_reseal_matrix (4.0K)
+- [DIR] research/results/t237_lose_streak (4.0K)
+- [DIR] research/results/t238_s3_sealq (1.2M)
+- [DIR] research/results/t239_break_intraday (4.0K)
+- [DIR] research/results/t240_c08_ledger (4.0K)
+- [DIR] research/results/t241_decay_radar (88K)
+- [DIR] research/results/t242_card_split (12K)
+- [DIR] research/results/t243_tripleboard_dip (76K)
+- [DIR] research/results/t244_market_gates (4.0K)
+- [DIR] research/results/t245_lowturn_board (4.0K)
+- [DIR] research/results/t246_golden_lateseal (720K)
+- [DIR] research/results/t247_sentinel_0810 (12K)
+- [DIR] research/results/t248_miner_v1 (84K)
+- [DIR] research/results/t249_promo_gate (144K)
+- research/results/t24_pk_run.log (3685B)
+- research/results/t24_r3_run.log (2084B)
+- research/results/t24_t10_run.log (2191B)
+- research/results/t24_t12_run.log (2190B)
+- research/results/t24_t8_run.log (2084B)
+- research/results/t24_tnone_run.log (2206B)
+- [DIR] research/results/t250_gate_engine (68K)
+- research/results/t251_equity_snapshot.json (1055B)
+- [DIR] research/results/t251_nav_audit (76K)
+- [DIR] research/results/t252_restructure_filter (4.0K)
+- [DIR] research/results/t253_ann_monitor (104K)
+- [DIR] research/results/t254_event_risk (48K)
+- [DIR] research/results/t255_structure_risk (96K)
+- [DIR] research/results/t256_heartbeat (28K)
+- [DIR] research/results/t257_reseal_final (3.4M)
+- [DIR] research/results/t258_speedup (28K)
+- [DIR] research/results/t259_budget (64K)
+- [DIR] research/results/t264_throttle_phase2 (12K)
+- [DIR] research/results/t265_review_fix (52K)
+- [DIR] research/results/t266_lowturn_climb (112K)
+- [DIR] research/results/t267_break_moment (132K)
+- [DIR] research/results/t268_gem_newfamily (520K)
+- [DIR] research/results/t269_flash_dip (2.0M)
+- [DIR] research/results/t270_ops_incident (20K)
+- [DIR] research/results/t272_pipeline_replenish (8.0K)
+- [DIR] research/results/t273_socket_guard (40K)
+- [DIR] research/results/t274_climb_field (20K)
+- [DIR] research/results/t279_sentinel_0811 (12K)
+- [DIR] research/results/t281_registry_fix (76K)
+- [DIR] research/results/t282_gate_partner (164K)
+- [DIR] research/results/t283_s3_freeze_pack (260K)
+- [DIR] research/results/t284_daytime_finish (12K)
+- [DIR] research/results/t285_s3_freeze (16K)
+- [DIR] research/results/t286_limitdown_fix (28K)
+- [DIR] research/results/t287_intraday_T (5.2M)
+- [DIR] research/results/t288_iq7 (120K)
+- [DIR] research/results/t289_iq8 (3.5M)
+- [DIR] research/results/t290_iq10_gate (176K)
+- [DIR] research/results/t292_limit_audit (188K)
+- [DIR] research/results/t293_shadow_offline (8.0K)
+- [DIR] research/results/t295_index_fix (20K)
+- [DIR] research/results/t296_first_to_second (140K)
+- [DIR] research/results/t297_earnings_block (3.6M)
+- [DIR] research/results/t298_hour_backfill (7.3M)
+- [DIR] research/results/t299_limit_unify (52K)
+- [DIR] research/results/t300_disk_sweep (740K)
+- [DIR] research/results/t301_sold_row_fmt (12K)
+- [DIR] research/results/t302_one_to_two (40M)
+- [DIR] research/results/t303_candidates_early (12K)
+- [DIR] research/results/t304_T_fix (8.1M)
+- [DIR] research/results/t305_dragon_comeback (17M)
+- [DIR] research/results/t306_s1_promo_overlay (348K)
+- [DIR] research/results/t307_exit_gate_migration (3.4M)
+- [DIR] research/results/t308_negprior_filter (208K)
+- [DIR] research/results/t309_s1_fatseg_rank (3.7M)
+- [DIR] research/results/t312_subnew_ipo (320K)
+- [DIR] research/results/t314_block_trade (5.3M)
+- [DIR] research/results/t316_ammo_ops (28K)
+- [DIR] research/results/t317_d1_trigger (33M)
+- [DIR] research/results/t318_block_limitup_cross (164K)
+- [DIR] research/results/t326_disk_cleanup (28K)
+- [DIR] research/results/t327_block_tilt (172K)
+- research/results/t5_run.log (2189B)
+- research/results/t6_pk_run.log (3683B)
+- research/results/t6_run.log (2189B)
+- research/results/t7_run.log (2188B)
+
+## 3. research/ 隔离区其余全部 (leader 2026-08-13追加裁决: ideas/注册表整目录也删)
+- [DIR] research/ideas (252K)
+- [DIR] research/live_audit (36K)
+- [DIR] research/logs (992K)
+- [DIR] research/probe (72K)
+- [DIR] research/__pycache__ (gitignored, 顺带清理)
+- research/rule2_final_report.md (4270B)
+- research/rule2_progress.md (95016B)
+- research/run_research_backtest.py (9930B)
+- [DIR] research/s5_exit_analysis (1.3M)
+- research/shadow_compare_surge.py (6948B)
+- research/shadow_surge_detector.py (39614B)
+- research/stock_personality_research.py (37409B)
+- research/stock_personality_s1.py (8529B)
+- research/stock_personality_v2.py (16135B)
+- [DIR] research/strategies_draft (40K)
+- research/STRATEGY_IDEA_PIPELINE.md (35450B)
+- research/t125_status.md (8266B)
+- research/t169_diagnostics.py (9216B)
+- research/t169_drawdown_replay.py (16002B)
+- research/t174_attribution.py (7853B)
+- research/t174_boost_engine_runner.py (11085B)
+- research/t179_engine_runner.py (5866B)
+- research/t179_signal_scan.py (9146B)
+
+## 4. 回收站目录
+- [DIR] .trash_t210 (8.0K)
+- [DIR] .trash_t300 (99M)
+
+## 5. 根目录研究残留 (任务书列举10项)
+- anchor_run.out (108B)
+- build_w31.log (95B)
+- combo.log (94B)
+- full_r1b.log (94B)
+- full_r2.log (94B)
+- full_v1.log (94B)
+- log_v2.txt (101B)
+- s5_gate4.log (101B)
+- nohup.out (14506231B)
+- server.py.bak_20260808_t232 (65996B)
+
+## 6. tools/ 研究性一次脚本 (逐一grep确认无白名单import/调用)
+- tools/t128_backfill_hour_20260805.py (4220B)
+- tools/emergency_timed_sz300789.py (2086B)
+- tools/sentinel_20260806.sh (13429B)
+- tools/task71_archive.sh (4179B)
+- tools/pipeline_checker.sh (1546B)
+- tools/seal_reseal_detector.py (24871B)
+- tools/shadow_tracker.py (20604B)
+- tools/backfill_block_trade.py (8273B)
+- tools/fetch_block_trade_daily.py (1950B)
+- tools/fetch_margin_daily.py (2057B)
+- tools/backfill_margin.py (9395B)
+- tools/backfill_minute_touchdays.py (10486B)
+  (seal_reseal_detector.py/shadow_tracker.py=Task#293已下线测试信号组件, cron已注释; shadow_ledger.py仅docstring提及无import)
+
+## 7. backup/ (git check-ignore exit=1未被忽略 → 按任务书仅保留t319/t320/t324回滚窗口)
+- backup/amplitude_reversal_detail.txt.bak_20260806_t204
+- backup/amplitude_reversal.log.bak_20260806_t204
+- backup/amplitude_reversal.py.bak_20260806_t143
+- backup/amplitude_reversal.py.bak_20260806_t204
+- backup/amplitude_reversal.py.bak_20260811_t299
+- backup/amplitude_reversal_trades.json.bak_20260806_t204
+- backup/announcement_monitor.py.bak_20260810_t270
+- backup/backfill_hour_tencent.py.bak_20260803_t36.gz
+- backup/backfill_index_kline.py.bak_20260811_t295
+- backup/backfill_index_kline_tencent.py.bak_20260811_t295
+- backup/backtest_vs_live_compare.py.bak_20260803_t47.gz
+- backup/baostock_ban_status.json.bak_20260806_t191
+- backup/baostock_budget.py.bak_20260810_t265
+- backup/baostock_recovery_probe.py.bak_20260806_t194
+- backup/baostock_recovery_probe.py.bak_20260810_t265
+- backup/baostock_recovery.py.bak_20260806_t194
+- backup/baostock_recovery.py.bak_20260806_t201
+- backup/baostock_recovery.py.bak_20260806_t203
+- backup/baostock_recovery.py.bak_20260808_t222
+- backup/baostock_recovery.py.bak_20260810_t265
+- backup/big_yang_low_open_v2.py.bak_20260805_t136
+- backup/board_lab_collector.py.bak_20260807_t219
+- backup/board_lab_collector.py.bak_20260808_t234
+- backup/candidates_20260806.json.bak_t128
+- backup/candidates_20260807.json.bak_t207_incomplete
+- backup/candidates_20260810.json.bak_t220_incomplete
+- backup/config.py.bak_20260803_s3restore_1612.gz
+- backup/config.py.bak_20260803_s3stop_1003.gz
+- backup/config.py.bak_20260806_t205
+- backup/config.py.bak_20260811_t285
+- backup/crontab.bak_20260810_t256
+- backup/daily_rolling_backtest.py.bak_20260803_t42.gz
+- backup/daily_rolling_backtest.py.bak_20260803_t46.gz
+- backup/daily_rolling_backtest.py.bak_20260803_t51.gz
+- backup/daily_rolling_backtest.py.bak_20260806_t204.gz
+- backup/daily_update.sh.bak_20260805_t125
+- backup/daily_update.sh.bak_20260810_t256
+- backup/daily_update.sh.bak_20260811_t295
+- backup/daily_update.sh.bak_20260811_t298
+- backup/dashboard.js.bak_20260803_t43.gz
+- backup/dashboard.js.bak_20260807_t209
+- backup/drawdown_guard.py.bak_20260810_t251.gz
+- backup/drawdown_state.json.bak_20260803_navfill_1641.gz
+- backup/drawdown_state.json.bak_20260810_t251
+- backup/events_20260807.jsonl.bak_t219
+- backup/events_20260807.jsonl.bak_t234
+- backup/fetch_daily_kline.py.bak_20260806_t194
+- backup/fetch_daily_kline.py.bak_20260806_t201
+- backup/fetch_daily_kline.py.bak_20260807_t211
+- backup/fetch_daily_kline.py.bak_20260808_t222
+- backup/fetch_daily_kline.py.bak_20260810_t256
+- backup/fetch_daily_kline.py.bak_20260810_t265
+- backup/fetch_daily_kline.py.bak_20260810_t273
+- backup/fetch_minute_kline.py.bak_20260806_t194
+- backup/fetch_minute_kline.py.bak_20260806_t201
+- backup/fetch_minute_kline.py.bak_20260810_t273
+- backup/firstboard_low_open_dip.py.bak_20260811_t299.gz
+- backup/gem_star_late_seal.py.bak_20260805_t136
+- backup/gem_star_late_seal.py.bak_20260811_t299
+- backup/generate_candidates.py.bak_20260806_t207
+- backup/generate_candidates.py.bak_20260807_t209
+- backup/generate_candidates.py.bak_20260810_t253
+- backup/generate_candidates.py.bak_20260810_t256
+- backup/generate_candidates.py.bak_20260811_t285
+- backup/generate_candidates.py.bak_20260811_t297
+- backup/generate_candidates.py.bak_20260811_t299
+- backup/intraday_monitor.py.bak_20260806_t185
+- backup/intraday_monitor.py.bak_20260806_t205
+- backup/intraday_monitor.py.bak_20260811_t286
+- backup/morning_decision.py.bak_20260806_t205
+- backup/morning_decision.py.bak_20260810_t253
+- backup/morning_decision.py.bak_20260810_t256
+- backup/morning_decision.py.bak_20260811_t285
+- backup/morning_decision.py.bak_20260811_t297
+- backup/notify.py.bak_20260805_t123
+- backup/notify.py.bak_20260805_t126
+- backup/notify.py.bak_20260806_t185
+- backup/notify.py.bak_20260806_t205
+- backup/notify.py.bak_20260807_t209
+- backup/notify.py.bak_20260810_t253
+- backup/notify.py.bak_20260810_t256
+- backup/notify.py.bak_20260811_t285
+- backup/notify.py.bak_20260811_t297
+- backup/observe_pool_summary_20260807.json.bak_t234
+- backup/position_scale.py.bak_20260806_t204.gz
+- backup/position_scale.py.bak_20260811_t299
+- backup/positions.json.bak_20260803_s3restore_1612.gz
+- backup/positions.json.bak_20260803_s3sell_1034.gz
+- backup/positions.json.bak_20260811_t286
+- backup/position_tracker.py.bak_20260805_t123
+- backup/position_tracker.py.bak_20260805_t126
+- backup/position_tracker.py.bak_20260806_t185
+- backup/position_tracker.py.bak_20260806_t205
+- backup/position_tracker.py.bak_20260811_t286
+- backup/proc_20260807.jsonl.bak_t219
+- backup/proc_20260807.jsonl.bak_t234
+- backup/PROJECT_STATUS.md.bak_20260811_t285
+- [DIR] backup/__pycache__ (gitignored)
+- backup/README.bak_20260811_t281
+- backup/run_unified.py.bak_20260806_t204.gz
+- backup/seal_reseal_detector.py.bak_20260809_t240
+- backup/server.py.bak_20260803_equityfix_1627.gz
+- backup/server.py.bak_20260803_t43.gz
+- backup/server.py.bak_20260805_t84_events
+- backup/server.py.bak_20260806_t184
+- backup/server.py.bak_20260807_t209
+- backup/server.py.bak_20260807_t212
+- backup/server.py.bak_20260808_t229
+- backup/server.py.bak_20260809_t240
+- backup/server.py.bak_20260811_t285
+- backup/server.py.bak_20260811_t301
+- backup/shadow_ledger.py.bak_20260807_t213
+- backup/shadow_ledger.py.bak_20260808_t229
+- backup/shadow_ledger.py.bak_20260809_t240
+- backup/shadow_ledger.py.bak_20260810_t274
+- backup/shadow_ledger.py.bak_20260811_t276
+- backup/shadow_ledger.py.bak_20260811_t285
+- backup/shadow_signals_20260724.json.bak_20260806_t183
+- backup/shadow_surge_detector.py.bak_20260806_t183
+- backup/shadow_surge_detector.py.bak_20260806_t199
+- backup/shadow_surge_detector.py.bak_20260807_t219
+- backup/shadow_surge_detector.py.bak_20260808_t229
+- backup/shadow_surge_detector.py.bak_20260810_t274
+- backup/shadow_surge_detector.py.bak_20260811_t276
+- backup/shadow_surge_detector.py.bak_20260811_t293
+- backup/signal.html.bak_20260805_t84_events
+- backup/signal.html.bak_20260806_t184
+- backup/signal.html.bak_20260807_t209
+- backup/signal.html.bak_20260807_t212
+- backup/signal.html.bak_20260808_t229
+- backup/signal.html.bak_20260809_t240
+- backup/signal.html.bak_20260809_t242
+- backup/signal.html.bak_20260810_t251
+- backup/signal.html.bak_20260810_t253
+- backup/signal.html.bak_20260811_t276
+- backup/signal.html.bak_20260811_t285
+- backup/signal.html.bak_20260811_t297
+- backup/signal.html.bak_20260811_t301
+- backup/signal.html.bak_20260812_t322
+- backup/STRATEGY_IDEA_PIPELINE.md.bak_20260811_t281
+- backup/trading_mechanism.md.bak_20260810_t256.gz
+- backup/trading_mechanism.md.bak_20260810_t265
+- backup/trading_mechanism.md.bak_20260811_t285
+- backup/trading_rules.py.bak_20260811_t286
+- backup/two_board_pullback_dip.py.bak_20260811_t299.gz
+- backup/weekly_solo_refresh.sh.bak_20260806_t204.gz
+
+## UNSURE清单 (拿不准, 保留不删, 报告用户)
+- tools/periodic_check.sh / periodic_status.sh / periodic_status_updater.sh / status_monitor.sh — progress_scheduler.py注释称已取代, 但属运维历史非研究死案
+- tools/backfill_index_kline.py — 被tencent版取代(daily_update.sh用tencent版), baostock版留作回补备用
+- tools/verify_daily_kline.py — 数据校验运维工具, 无引用但非研究死案
+- tools/board_lab_backtest.py — board_lab活跃采集链的研究回测器, 采集链在产
+- tools/crontab_backup_*.txt(7个)+crontab_new.txt — crontab变更审计历史
+- tools/em_snapshot.py — realtime/data_feed.py注释声明的东财备源能力, 保留
+- tools/build_commitment_calendar.py — 产物commitment_calendar.json被announcement_monitor(在产)消费, 保留
+- scripts/generate_trade_details_json.py — 无引用但疑似前端数据生成器; scripts/shadow_compare.py被intraday_monitor引用必留
+- 根目录FINAL_STATE_20260802.md/RESEARCH_SUMMARY_20260803.md/CLEANUP_DELETED_20260802.txt/PROGRESS_LOG.md/QUICK_REFERENCE.txt/PHASE — 任务书未列举, 保留
+- realtime/*.bak_20260812_t320 等realtime目录内bak — t320上线回滚窗口, 保留

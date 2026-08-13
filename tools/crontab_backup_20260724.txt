@@ -1,0 +1,6 @@
+30 18 * * 1-5 /bin/bash /home/AIWealth/tools/daily_update.sh
+*/10 * * * * /usr/bin/python3 /home/AIWealth/scripts/update_status.py >> /home/AIWealth/logs/update_status.log 2>&1
+# AIWealth 实盘信号系统
+0 22 * * 1-5 cd /home/AIWealth && python3 realtime/generate_candidates.py >> logs/realtime/generate_candidates.log 2>&1
+25 9 * * 1-5 cd /home/AIWealth && python3 realtime/morning_decision.py >> logs/realtime/morning_decision.log 2>&1
+0 10,11,13,14,15 * * 1-5 cd /home/AIWealth && python3 realtime/position_tracker.py auto-close >> logs/realtime/position_tracker.log 2>&1
